@@ -33,10 +33,15 @@ Prefer tests that assert meaningful invariants and behavior over brittle full-fi
 
 ## Fixture Conventions
 
-Use fixture mini-projects under crate test directories. Planned convention:
+Use fixture mini-projects in locations that are CLI-friendly by default.
 
-- `crates/engine/tests/fixtures/<case>/input/...`
-- Optional `crates/engine/tests/fixtures/<case>/notes.md` for scenario intent.
+- Preferred default: `tests/fixtures/<case>/input/...`
+- Optional case notes: `tests/fixtures/<case>/notes.md`
+- Alternative for larger scenarios: keep fixtures in a dedicated sibling project folder designed to be passed directly to the CLI.
+
+The fixture root should be invokable directly, for example:
+
+- `cargo run -p cli -- --root tests/fixtures/<case>/input`
 
 Each fixture should target a single behavior or edge case and include only files needed for that case.
 
