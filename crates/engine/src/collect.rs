@@ -7,6 +7,7 @@ use context_analyzer_core::model::{
     ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, FunctionOwnerKind, ProjectFacts,
     ProviderUse, RenderEdge,
 };
+use context_analyzer_frontend::SourceFileInput;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, CallExpression, Expression, Function, JSXAttributeItem, JSXElement, JSXElementName,
@@ -19,36 +20,30 @@ use oxc_syntax::scope::ScopeFlags;
 use rayon::prelude::*;
 use std::path::Path;
 
-#[derive(Debug, Clone)]
-pub struct SourceFileForCollection {
-    pub file_path: String,
-    pub source_text: String,
-}
-
-pub fn collect_project_facts(source_files: &[SourceFileForCollection]) -> ProjectFacts {
+pub fn collect_project_facts(source_files: &[SourceFileInput]) -> ProjectFacts {
     let files: Vec<FileFacts> = source_files.par_iter().map(collect_file_facts).collect();
 
     ProjectFacts::from_files(files)
 }
 
-pub fn collect_file_facts(source_file: &SourceFileForCollection) -> FileFacts {
-    let source_type = match SourceType::from_path(Path::new(&source_file.file_path)) {
+pub fn collect_file_facts(source_file: &SourceFileInput) -> FileFacts {
+    let source_type = match SourceType::from_path(Path::new(&source_file.path)) {
         Ok(source_type) => source_type,
-        Err(_) => return empty_file_facts(&source_file.file_path),
+        Err(_) => return empty_file_facts(&source_file.path),
     };
 
     let allocator = Allocator::default();
     let parser_output = Parser::new(&allocator, &source_file.source_text, source_type).parse();
 
     if !parser_output.errors.is_empty() {
-        return empty_file_facts(&source_file.file_path);
+        return empty_file_facts(&source_file.path);
     }
 
     let mut collector = AstCollector::default();
     collector.visit_program(&parser_output.program);
 
     FileFacts {
-        file_path: source_file.file_path.clone(),
+        file_path: source_file.path.to_string_lossy().to_string(),
         contexts: collector.contexts,
         components: collector.components,
         providers: collector.providers,
@@ -57,9 +52,9 @@ pub fn collect_file_facts(source_file: &SourceFileForCollection) -> FileFacts {
     }
 }
 
-fn empty_file_facts(file_path: &str) -> FileFacts {
+fn empty_file_facts(file_path: &std::path::Path) -> FileFacts {
     FileFacts {
-        file_path: file_path.to_string(),
+        file_path: file_path.to_string_lossy().to_string(),
         contexts: Vec::new(),
         components: Vec::new(),
         providers: Vec::new(),
@@ -338,14 +333,17 @@ fn jsx_has_value_attribute(opening_element: &JSXOpeningElement<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use context_analyzer_core::model::FunctionOwnerKind;
+    use std::path::PathBuf;
 
-    use super::{SourceFileForCollection, collect_file_facts, collect_project_facts};
+    use context_analyzer_core::model::FunctionOwnerKind;
+    use context_analyzer_frontend::SourceFileInput;
+
+    use super::{collect_file_facts, collect_project_facts};
 
     #[test]
     fn collect_file_facts_extracts_context_component_provider_consumer_and_render_edges() {
-        let source_file = SourceFileForCollection {
-            file_path: "src/App.tsx".to_string(),
+        let source_file = SourceFileInput {
+            path: PathBuf::from("src/App.tsx"),
             source_text: r#"
                 import React, { createContext, useContext } from "react";
 
@@ -426,8 +424,8 @@ mod tests {
 
     #[test]
     fn collect_file_facts_returns_empty_collections_for_parse_failures() {
-        let source_file = SourceFileForCollection {
-            file_path: "src/Broken.tsx".to_string(),
+        let source_file = SourceFileInput {
+            path: PathBuf::from("src/Broken.tsx"),
             source_text: "const = ;".to_string(),
         };
 
@@ -443,12 +441,12 @@ mod tests {
     #[test]
     fn collect_project_facts_aggregates_counts_across_files() {
         let files = vec![
-            SourceFileForCollection {
-                file_path: "src/App.tsx".to_string(),
+            SourceFileInput {
+                path: PathBuf::from("src/App.tsx"),
                 source_text: "function App() { return <ProfilePage />; }".to_string(),
             },
-            SourceFileForCollection {
-                file_path: "src/Page.tsx".to_string(),
+            SourceFileInput {
+                path: PathBuf::from("src/Page.tsx"),
                 source_text: "const ThemeContext = createContext(null); function ProfilePage() { const value = useContext(ThemeContext); return <div />; }".to_string(),
             },
         ];
@@ -464,8 +462,8 @@ mod tests {
 
     #[test]
     fn consumer_inside_hook_records_function_owner_mapping() {
-        let source_file = SourceFileForCollection {
-            file_path: "src/hooks.tsx".to_string(),
+        let source_file = SourceFileInput {
+            path: PathBuf::from("src/hooks.tsx"),
             source_text: r#"
                 import { useContext, createContext } from "react";
 

@@ -55,7 +55,7 @@ Run these before opening a PR:
 
 Run the CLI locally:
 
-- `cargo run -p cli -- --help`
+- `cargo run -p cli -- tests/fixtures/basic_working_context/input --pretty`
 
 ## Rust Style Expectations
 
