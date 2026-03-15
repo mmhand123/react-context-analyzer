@@ -11,3 +11,6 @@ path = "src/lib.rs"
 oxc_allocator = "0.119.0"
 oxc_parser = "0.119.0"
 oxc_span = "0.119.0"
+
+[dev-dependencies]
+tempfile = "3.14.0"
