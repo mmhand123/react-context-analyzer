@@ -36,3 +36,37 @@ pub fn parse_source_path(path: &Path, source_text: &str) -> Result<ParsedFile, P
         SourceType::from_path(path).map_err(|_| ParseFileError::UnsupportedExtension)?;
     Ok(parse_source_text(source_text, source_type))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{ParseFileError, parse_source_path, parse_source_text};
+    use oxc_span::SourceType;
+
+    #[test]
+    fn parse_source_path_maps_unknown_extensions_to_unsupported_extension_error() {
+        let path = Path::new("src/not_supported.txt");
+
+        let error = parse_source_path(path, "const value = 1;")
+            .expect_err("unsupported extensions should return an explicit error");
+
+        assert_eq!(error, ParseFileError::UnsupportedExtension);
+    }
+
+    #[test]
+    fn parse_source_text_reports_errors_for_invalid_syntax() {
+        let parsed_file = parse_source_text("const = ;", SourceType::ts());
+
+        assert!(!parsed_file.parsed_successfully());
+        assert!(parsed_file.parse_error_count > 0);
+    }
+
+    #[test]
+    fn parse_source_text_reports_zero_errors_for_valid_syntax() {
+        let parsed_file = parse_source_text("const value = 1;", SourceType::ts());
+
+        assert!(parsed_file.parsed_successfully());
+        assert_eq!(parsed_file.parse_error_count, 0);
+    }
+}
