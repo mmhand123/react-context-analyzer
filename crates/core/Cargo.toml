@@ -8,4 +8,8 @@ name = "context_analyzer_core"
 path = "src/lib.rs"
 
 [dependencies]
-oxc_span = "0.119.0"
+oxc_span = { version = "0.119.0", features = ["serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"
