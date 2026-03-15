@@ -1,4 +1,6 @@
-use context_analyzer_core::model::{FileFacts, ProjectFacts};
+use context_analyzer_core::model::{
+    ComponentNode, FileFacts, ProjectFacts, ResolvedRenderEdge, UnresolvedRenderEdge,
+};
 
 pub fn to_json_pretty(project_facts: &ProjectFacts) -> Result<String, serde_json::Error> {
     let normalized_facts = normalized_project_facts(project_facts);
@@ -19,10 +21,73 @@ fn normalized_project_facts(project_facts: &ProjectFacts) -> ProjectFacts {
         normalize_file_facts(file_facts);
     }
 
+    let mut normalized_graph = project_facts.graph.clone();
+    normalize_graph(&mut normalized_graph);
+
     ProjectFacts {
         summary: project_facts.summary.clone(),
         files: normalized_files,
+        graph: normalized_graph,
     }
+}
+
+fn normalize_graph(graph: &mut context_analyzer_core::model::ProjectGraph) {
+    graph.components.sort_by(component_node_sort_key);
+
+    graph
+        .resolved_render_edges
+        .sort_by(resolved_render_edge_sort_key);
+
+    graph
+        .unresolved_render_edges
+        .sort_by(unresolved_render_edge_sort_key);
+}
+
+fn component_node_sort_key(left: &ComponentNode, right: &ComponentNode) -> std::cmp::Ordering {
+    left.id
+        .file_path
+        .cmp(&right.id.file_path)
+        .then_with(|| left.id.component_name.cmp(&right.id.component_name))
+}
+
+fn resolved_render_edge_sort_key(
+    left: &ResolvedRenderEdge,
+    right: &ResolvedRenderEdge,
+) -> std::cmp::Ordering {
+    left.parent_component_id
+        .file_path
+        .cmp(&right.parent_component_id.file_path)
+        .then_with(|| {
+            left.parent_component_id
+                .component_name
+                .cmp(&right.parent_component_id.component_name)
+        })
+        .then_with(|| {
+            left.child_component_id
+                .file_path
+                .cmp(&right.child_component_id.file_path)
+        })
+        .then_with(|| {
+            left.child_component_id
+                .component_name
+                .cmp(&right.child_component_id.component_name)
+        })
+}
+
+fn unresolved_render_edge_sort_key(
+    left: &UnresolvedRenderEdge,
+    right: &UnresolvedRenderEdge,
+) -> std::cmp::Ordering {
+    left.parent_component_id
+        .file_path
+        .cmp(&right.parent_component_id.file_path)
+        .then_with(|| {
+            left.parent_component_id
+                .component_name
+                .cmp(&right.parent_component_id.component_name)
+        })
+        .then_with(|| left.child_symbol.cmp(&right.child_symbol))
+        .then_with(|| left.reason.cmp(&right.reason))
 }
 
 fn normalize_file_facts(file_facts: &mut FileFacts) {
@@ -67,8 +132,9 @@ fn normalize_file_facts(file_facts: &mut FileFacts) {
 #[cfg(test)]
 mod tests {
     use context_analyzer_core::model::{
-        ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, FunctionOwnerKind,
-        ProjectFacts, ProviderUse, RenderEdge, Span,
+        ComponentDef, ComponentId, ComponentNode, ConsumerUse, ContextDef, ContextRef, FileFacts,
+        FunctionOwnerKind, ProjectFacts, ProviderUse, RenderEdge, ResolvedRenderEdge, Span,
+        UnresolvedRenderEdge,
     };
 
     use super::{to_json_compact, to_json_pretty};
@@ -86,6 +152,15 @@ mod tests {
             file_facts.consumers.reverse();
             file_facts.render_edges.reverse();
         }
+        project_facts_variant_two.graph.components.reverse();
+        project_facts_variant_two
+            .graph
+            .resolved_render_edges
+            .reverse();
+        project_facts_variant_two
+            .graph
+            .unresolved_render_edges
+            .reverse();
 
         let output_one =
             to_json_compact(&project_facts_variant_one).expect("json should serialize");
@@ -104,6 +179,7 @@ mod tests {
 
         assert!(json_value.get("summary").is_some());
         assert!(json_value.get("files").is_some());
+        assert!(json_value.get("graph").is_some());
         assert!(json_value.get("diagnostics").is_none());
     }
 
@@ -155,6 +231,42 @@ mod tests {
             });
         }
 
-        ProjectFacts::from_files(files)
+        let mut project_facts = ProjectFacts::from_files(files);
+        project_facts.graph.components = vec![
+            ComponentNode {
+                id: ComponentId {
+                    file_path: "src/Zebra.tsx".to_string(),
+                    component_name: "ZebraPage".to_string(),
+                },
+            },
+            ComponentNode {
+                id: ComponentId {
+                    file_path: "src/Alpha.tsx".to_string(),
+                    component_name: "AlphaPage".to_string(),
+                },
+            },
+        ];
+        project_facts.graph.resolved_render_edges = vec![ResolvedRenderEdge {
+            parent_component_id: ComponentId {
+                file_path: "src/Zebra.tsx".to_string(),
+                component_name: "ZebraPage".to_string(),
+            },
+            child_component_id: ComponentId {
+                file_path: "src/Alpha.tsx".to_string(),
+                component_name: "AlphaPage".to_string(),
+            },
+            span: Span::new(71, 80),
+        }];
+        project_facts.graph.unresolved_render_edges = vec![UnresolvedRenderEdge {
+            parent_component_id: ComponentId {
+                file_path: "src/Alpha.tsx".to_string(),
+                component_name: "AlphaPage".to_string(),
+            },
+            child_symbol: "UnknownWidget".to_string(),
+            span: Span::new(81, 90),
+            reason: "symbol_not_found".to_string(),
+        }];
+
+        project_facts
     }
 }
