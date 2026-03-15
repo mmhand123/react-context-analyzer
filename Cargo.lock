@@ -93,9 +93,6 @@ dependencies = [
 name = "context-analyzer-frontend"
 version = "0.1.0"
 dependencies = [
- "oxc_allocator",
- "oxc_parser",
- "oxc_span",
  "rayon",
  "tempfile",
 ]

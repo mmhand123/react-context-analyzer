@@ -23,7 +23,6 @@ use std::path::Path;
 pub struct SourceFileForCollection {
     pub file_path: String,
     pub source_text: String,
-    pub parse_error_count: usize,
 }
 
 pub fn collect_project_facts(source_files: &[SourceFileForCollection]) -> ProjectFacts {
@@ -33,10 +32,6 @@ pub fn collect_project_facts(source_files: &[SourceFileForCollection]) -> Projec
 }
 
 pub fn collect_file_facts(source_file: &SourceFileForCollection) -> FileFacts {
-    if source_file.parse_error_count > 0 {
-        return empty_file_facts(&source_file.file_path);
-    }
-
     let source_type = match SourceType::from_path(Path::new(&source_file.file_path)) {
         Ok(source_type) => source_type,
         Err(_) => return empty_file_facts(&source_file.file_path),
@@ -370,7 +365,6 @@ mod tests {
                 };
             "#
             .to_string(),
-            parse_error_count: 0,
         };
 
         let file_facts = collect_file_facts(&source_file);
@@ -435,7 +429,6 @@ mod tests {
         let source_file = SourceFileForCollection {
             file_path: "src/Broken.tsx".to_string(),
             source_text: "const = ;".to_string(),
-            parse_error_count: 1,
         };
 
         let file_facts = collect_file_facts(&source_file);
@@ -453,12 +446,10 @@ mod tests {
             SourceFileForCollection {
                 file_path: "src/App.tsx".to_string(),
                 source_text: "function App() { return <ProfilePage />; }".to_string(),
-                parse_error_count: 0,
             },
             SourceFileForCollection {
                 file_path: "src/Page.tsx".to_string(),
                 source_text: "const ThemeContext = createContext(null); function ProfilePage() { const value = useContext(ThemeContext); return <div />; }".to_string(),
-                parse_error_count: 0,
             },
         ];
 
@@ -485,7 +476,6 @@ mod tests {
                 }
             "#
             .to_string(),
-            parse_error_count: 0,
         };
 
         let file_facts = collect_file_facts(&source_file);

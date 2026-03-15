@@ -5,20 +5,20 @@
 This repository uses a Cargo workspace with these crates:
 
 - `crates/core`: shared domain model and cross-crate types.
-- `crates/frontend`: repository scanning and source parsing.
+- `crates/frontend`: repository scanning and source loading.
 - `crates/engine`: analysis and extraction passes.
 - `crates/report`: output shaping and serialization.
 - `crates/cli`: command-line entrypoint and orchestration.
 
 Use Oxc types for source metadata when available. In particular, span data should come from `oxc_span::Span` through `core` so all crates share one canonical representation.
-The parser pipeline should be driven by Oxc crates (`oxc_parser`, `oxc_allocator`, `oxc_span`) from `frontend`.
+The parser and AST walk pipeline should be driven by Oxc crates from `engine`.
 
 Keep business logic in libraries and keep the CLI thin.
 
 ## Folder Usage
 
 - Place reusable domain structs in `crates/core/src`.
-- Place parser and file-discovery code in `crates/frontend/src`.
+- Place file-discovery and source-loading code in `crates/frontend/src`.
 - Place extraction and analysis passes in `crates/engine/src`.
 - Place output formatters in `crates/report/src`.
 - Place argument parsing and pipeline wiring in `crates/cli/src/main.rs`.

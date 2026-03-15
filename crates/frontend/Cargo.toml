@@ -8,9 +8,6 @@ name = "context_analyzer_frontend"
 path = "src/lib.rs"
 
 [dependencies]
-oxc_allocator = "0.119.0"
-oxc_parser = "0.119.0"
-oxc_span = "0.119.0"
 rayon = "1.10.0"
 
 [dev-dependencies]
