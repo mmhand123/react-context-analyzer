@@ -1,0 +1,13 @@
+[package]
+name = "context-analyzer-frontend"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "context_analyzer_frontend"
+path = "src/lib.rs"
+
+[dependencies]
+oxc_allocator = "0.119.0"
+oxc_parser = "0.119.0"
+oxc_span = "0.119.0"

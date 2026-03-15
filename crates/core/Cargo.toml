@@ -1,0 +1,11 @@
+[package]
+name = "context-analyzer-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "context_analyzer_core"
+path = "src/lib.rs"
+
+[dependencies]
+oxc_span = "0.119.0"

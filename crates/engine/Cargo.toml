@@ -1,0 +1,11 @@
+[package]
+name = "context-analyzer-engine"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "context_analyzer_engine"
+path = "src/lib.rs"
+
+[dependencies]
+context-analyzer-core = { path = "../core" }
