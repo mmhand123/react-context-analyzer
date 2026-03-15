@@ -9,3 +9,10 @@ path = "src/lib.rs"
 
 [dependencies]
 context-analyzer-core = { path = "../core" }
+oxc_allocator = "0.119.0"
+oxc_ast = "0.119.0"
+oxc_ast_visit = "0.119.0"
+oxc_parser = "0.119.0"
+oxc_span = "0.119.0"
+oxc_syntax = "0.119.0"
+rayon = "1.10.0"

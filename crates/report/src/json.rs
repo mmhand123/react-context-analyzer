@@ -67,8 +67,8 @@ fn normalize_file_facts(file_facts: &mut FileFacts) {
 #[cfg(test)]
 mod tests {
     use context_analyzer_core::model::{
-        ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, ProjectFacts, ProviderUse,
-        RenderEdge, Span,
+        ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, FunctionOwnerKind,
+        ProjectFacts, ProviderUse, RenderEdge, Span,
     };
 
     use super::{to_json_compact, to_json_pretty};
@@ -133,6 +133,8 @@ mod tests {
                         resolved_context_id: None,
                     },
                     containing_component_name: Some("App".to_string()),
+                    containing_function_name: Some("App".to_string()),
+                    containing_function_kind: Some(FunctionOwnerKind::Component),
                     span: Span::new(41, 50),
                 }],
                 consumers: vec![ConsumerUse {
@@ -141,6 +143,8 @@ mod tests {
                         resolved_context_id: None,
                     },
                     containing_component_name: Some("App".to_string()),
+                    containing_function_name: Some("App".to_string()),
+                    containing_function_kind: Some(FunctionOwnerKind::Component),
                     span: Span::new(51, 60),
                 }],
                 render_edges: vec![RenderEdge {

@@ -82,9 +82,19 @@ pub struct ContextRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FunctionOwnerKind {
+    Component,
+    Hook,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderUse {
     pub context_ref: ContextRef,
     pub containing_component_name: Option<String>,
+    pub containing_function_name: Option<String>,
+    pub containing_function_kind: Option<FunctionOwnerKind>,
     pub span: Span,
 }
 
@@ -92,6 +102,8 @@ pub struct ProviderUse {
 pub struct ConsumerUse {
     pub context_ref: ContextRef,
     pub containing_component_name: Option<String>,
+    pub containing_function_name: Option<String>,
+    pub containing_function_kind: Option<FunctionOwnerKind>,
     pub span: Span,
 }
 
@@ -105,8 +117,8 @@ pub struct RenderEdge {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, ProjectFacts, ProviderUse,
-        RenderEdge, Span,
+        ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, FunctionOwnerKind,
+        ProjectFacts, ProviderUse, RenderEdge, Span,
     };
 
     #[test]
@@ -127,6 +139,8 @@ mod tests {
                     resolved_context_id: None,
                 },
                 containing_component_name: Some("App".to_string()),
+                containing_function_name: Some("App".to_string()),
+                containing_function_kind: Some(FunctionOwnerKind::Component),
                 span: Span::new(31, 50),
             }],
             consumers: vec![ConsumerUse {
@@ -135,6 +149,8 @@ mod tests {
                     resolved_context_id: None,
                 },
                 containing_component_name: Some("App".to_string()),
+                containing_function_name: Some("App".to_string()),
+                containing_function_kind: Some(FunctionOwnerKind::Component),
                 span: Span::new(51, 70),
             }],
             render_edges: vec![RenderEdge {
