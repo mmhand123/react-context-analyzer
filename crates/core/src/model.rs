@@ -96,9 +96,47 @@ pub struct FileFacts {
     pub file_path: String,
     pub contexts: Vec<ContextDef>,
     pub components: Vec<ComponentDef>,
+    #[serde(skip_serializing)]
+    pub module_imports: Vec<ImportSymbol>,
+    #[serde(skip_serializing)]
+    pub module_exports: Vec<ExportSymbol>,
     pub providers: Vec<ProviderUse>,
     pub consumers: Vec<ConsumerUse>,
     pub render_edges: Vec<RenderEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportKind {
+    Named,
+    Default,
+    Namespace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportSymbol {
+    pub source_module: String,
+    pub local_name: String,
+    pub imported_name: Option<String>,
+    pub kind: ImportKind,
+    pub is_type_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportKind {
+    Named,
+    Default,
+    ReExportAll,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExportSymbol {
+    pub export_name: String,
+    pub local_name: Option<String>,
+    pub source_module: Option<String>,
+    pub kind: ExportKind,
+    pub is_type_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -155,9 +193,9 @@ pub struct RenderEdge {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComponentDef, ComponentId, ComponentNode, ConsumerUse, ContextDef, ContextRef, FileFacts,
-        FunctionOwnerKind, ProjectFacts, ProviderUse, RenderEdge, ResolvedRenderEdge, Span,
-        UnresolvedRenderEdge,
+        ComponentDef, ComponentId, ComponentNode, ConsumerUse, ContextDef, ContextRef, ExportKind,
+        ExportSymbol, FileFacts, FunctionOwnerKind, ImportKind, ImportSymbol, ProjectFacts,
+        ProviderUse, RenderEdge, ResolvedRenderEdge, Span, UnresolvedRenderEdge,
     };
 
     #[test]
@@ -171,6 +209,20 @@ mod tests {
             components: vec![ComponentDef {
                 name: "App".to_string(),
                 span: Span::new(11, 30),
+            }],
+            module_imports: vec![ImportSymbol {
+                source_module: "./profile".to_string(),
+                local_name: "ProfilePage".to_string(),
+                imported_name: Some("ProfilePage".to_string()),
+                kind: ImportKind::Named,
+                is_type_only: false,
+            }],
+            module_exports: vec![ExportSymbol {
+                export_name: "App".to_string(),
+                local_name: Some("App".to_string()),
+                source_module: None,
+                kind: ExportKind::Named,
+                is_type_only: false,
             }],
             providers: vec![ProviderUse {
                 context_ref: ContextRef {

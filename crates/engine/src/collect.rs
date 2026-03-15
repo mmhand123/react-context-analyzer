@@ -4,14 +4,16 @@ use crate::function_name::{
     extract_function_name_from_variable_declarator, extract_jsx_component_name,
 };
 use context_analyzer_core::model::{
-    ComponentDef, ConsumerUse, ContextDef, ContextRef, FileFacts, FunctionOwnerKind, ProjectFacts,
-    ProviderUse, RenderEdge,
+    ComponentDef, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol, FileFacts,
+    FunctionOwnerKind, ImportKind, ImportSymbol, ProjectFacts, ProviderUse, RenderEdge,
 };
 use context_analyzer_frontend::SourceFileInput;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, CallExpression, Expression, Function, JSXAttributeItem, JSXElement, JSXElementName,
-    JSXOpeningElement, VariableDeclarator,
+    Argument, CallExpression, ExportAllDeclaration, ExportDefaultDeclaration,
+    ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression, Function, ImportDeclaration,
+    ImportDeclarationSpecifier, JSXAttributeItem, JSXElement, JSXElementName, JSXOpeningElement,
+    ModuleExportName, VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -46,6 +48,8 @@ pub fn collect_file_facts(source_file: &SourceFileInput) -> FileFacts {
         file_path: source_file.path.to_string_lossy().to_string(),
         contexts: collector.contexts,
         components: collector.components,
+        module_imports: collector.module_imports,
+        module_exports: collector.module_exports,
         providers: collector.providers,
         consumers: collector.consumers,
         render_edges: collector.render_edges,
@@ -57,6 +61,8 @@ fn empty_file_facts(file_path: &std::path::Path) -> FileFacts {
         file_path: file_path.to_string_lossy().to_string(),
         contexts: Vec::new(),
         components: Vec::new(),
+        module_imports: Vec::new(),
+        module_exports: Vec::new(),
         providers: Vec::new(),
         consumers: Vec::new(),
         render_edges: Vec::new(),
@@ -67,6 +73,8 @@ fn empty_file_facts(file_path: &std::path::Path) -> FileFacts {
 struct AstCollector {
     contexts: Vec<ContextDef>,
     components: Vec<ComponentDef>,
+    module_imports: Vec<ImportSymbol>,
+    module_exports: Vec<ExportSymbol>,
     providers: Vec<ProviderUse>,
     consumers: Vec<ConsumerUse>,
     render_edges: Vec<RenderEdge>,
@@ -81,6 +89,116 @@ struct FunctionOwnerFrame {
 }
 
 impl<'a> Visit<'a> for AstCollector {
+    fn visit_import_declaration(&mut self, import_declaration: &ImportDeclaration<'a>) {
+        let source_module = import_declaration.source.value.as_str().to_string();
+
+        if let Some(specifiers) = &import_declaration.specifiers {
+            for specifier in specifiers {
+                match specifier {
+                    ImportDeclarationSpecifier::ImportSpecifier(import_specifier) => {
+                        self.module_imports.push(ImportSymbol {
+                            source_module: source_module.clone(),
+                            local_name: import_specifier.local.name.as_str().to_string(),
+                            imported_name: Some(module_export_name(
+                                import_specifier.imported.clone(),
+                            )),
+                            kind: ImportKind::Named,
+                            is_type_only: import_specifier.import_kind.is_type(),
+                        });
+                    }
+                    ImportDeclarationSpecifier::ImportDefaultSpecifier(
+                        import_default_specifier,
+                    ) => {
+                        self.module_imports.push(ImportSymbol {
+                            source_module: source_module.clone(),
+                            local_name: import_default_specifier.local.name.as_str().to_string(),
+                            imported_name: Some("default".to_string()),
+                            kind: ImportKind::Default,
+                            is_type_only: false,
+                        });
+                    }
+                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                        import_namespace_specifier,
+                    ) => {
+                        self.module_imports.push(ImportSymbol {
+                            source_module: source_module.clone(),
+                            local_name: import_namespace_specifier.local.name.as_str().to_string(),
+                            imported_name: None,
+                            kind: ImportKind::Namespace,
+                            is_type_only: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        walk::walk_import_declaration(self, import_declaration);
+    }
+
+    fn visit_export_named_declaration(
+        &mut self,
+        export_named_declaration: &ExportNamedDeclaration<'a>,
+    ) {
+        let source_module = export_named_declaration
+            .source
+            .as_ref()
+            .map(|literal| literal.value.as_str().to_string());
+
+        for specifier in &export_named_declaration.specifiers {
+            self.module_exports.push(ExportSymbol {
+                export_name: module_export_name(specifier.exported.clone()),
+                local_name: Some(module_export_name(specifier.local.clone())),
+                source_module: source_module.clone(),
+                kind: ExportKind::Named,
+                is_type_only: specifier.export_kind.is_type(),
+            });
+        }
+
+        walk::walk_export_named_declaration(self, export_named_declaration);
+    }
+
+    fn visit_export_default_declaration(
+        &mut self,
+        export_default_declaration: &ExportDefaultDeclaration<'a>,
+    ) {
+        let local_name = match &export_default_declaration.declaration {
+            ExportDefaultDeclarationKind::FunctionDeclaration(function_declaration) => {
+                function_declaration
+                    .id
+                    .as_ref()
+                    .map(|identifier| identifier.name.as_str().to_string())
+            }
+            ExportDefaultDeclarationKind::ClassDeclaration(class_declaration) => class_declaration
+                .id
+                .as_ref()
+                .map(|identifier| identifier.name.as_str().to_string()),
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(_) => None,
+            _ => None,
+        };
+
+        self.module_exports.push(ExportSymbol {
+            export_name: "default".to_string(),
+            local_name,
+            source_module: None,
+            kind: ExportKind::Default,
+            is_type_only: false,
+        });
+
+        walk::walk_export_default_declaration(self, export_default_declaration);
+    }
+
+    fn visit_export_all_declaration(&mut self, export_all_declaration: &ExportAllDeclaration<'a>) {
+        self.module_exports.push(ExportSymbol {
+            export_name: "*".to_string(),
+            local_name: None,
+            source_module: Some(export_all_declaration.source.value.as_str().to_string()),
+            kind: ExportKind::ReExportAll,
+            is_type_only: export_all_declaration.export_kind.is_type(),
+        });
+
+        walk::walk_export_all_declaration(self, export_all_declaration);
+    }
+
     fn visit_function(&mut self, function_node: &Function<'a>, flags: ScopeFlags) {
         if let Some(function_name) = extract_declared_function_name(function_node) {
             let owner_kind = classify_function_owner_kind(&function_name);
@@ -318,6 +436,20 @@ fn extract_provider_symbol(opening_element: &JSXOpeningElement<'_>) -> Option<St
     }
 }
 
+fn module_export_name(export_name: ModuleExportName<'_>) -> String {
+    match export_name {
+        ModuleExportName::IdentifierName(identifier_name) => {
+            identifier_name.name.as_str().to_string()
+        }
+        ModuleExportName::IdentifierReference(identifier_reference) => {
+            identifier_reference.name.as_str().to_string()
+        }
+        ModuleExportName::StringLiteral(string_literal) => {
+            string_literal.value.as_str().to_string()
+        }
+    }
+}
+
 fn jsx_has_value_attribute(opening_element: &JSXOpeningElement<'_>) -> bool {
     opening_element
         .attributes
@@ -335,7 +467,7 @@ fn jsx_has_value_attribute(opening_element: &JSXOpeningElement<'_>) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    use context_analyzer_core::model::FunctionOwnerKind;
+    use context_analyzer_core::model::{ExportKind, FunctionOwnerKind, ImportKind};
     use context_analyzer_frontend::SourceFileInput;
 
     use super::{collect_file_facts, collect_project_facts};
@@ -420,6 +552,28 @@ mod tests {
                 .any(|edge| edge.parent_component_name == "ProfilePage"
                     && edge.child_component_name == "Header")
         );
+
+        assert_eq!(file_facts.module_imports.len(), 3);
+        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+            import_symbol.source_module == "react"
+                && import_symbol.local_name == "React"
+                && import_symbol.imported_name.as_deref() == Some("default")
+                && import_symbol.kind == ImportKind::Default
+        }));
+        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+            import_symbol.source_module == "react"
+                && import_symbol.local_name == "createContext"
+                && import_symbol.imported_name.as_deref() == Some("createContext")
+                && import_symbol.kind == ImportKind::Named
+        }));
+        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+            import_symbol.source_module == "react"
+                && import_symbol.local_name == "useContext"
+                && import_symbol.imported_name.as_deref() == Some("useContext")
+                && import_symbol.kind == ImportKind::Named
+        }));
+
+        assert!(file_facts.module_exports.is_empty());
     }
 
     #[test]
@@ -433,6 +587,8 @@ mod tests {
 
         assert!(file_facts.contexts.is_empty());
         assert!(file_facts.components.is_empty());
+        assert!(file_facts.module_imports.is_empty());
+        assert!(file_facts.module_exports.is_empty());
         assert!(file_facts.providers.is_empty());
         assert!(file_facts.consumers.is_empty());
         assert!(file_facts.render_edges.is_empty());
@@ -488,5 +644,65 @@ mod tests {
             Some(FunctionOwnerKind::Hook)
         );
         assert_eq!(file_facts.consumers[0].containing_component_name, None);
+    }
+
+    #[test]
+    fn collect_file_facts_extracts_import_and_export_symbols() {
+        let source_file = SourceFileInput {
+            path: PathBuf::from("src/module.tsx"),
+            source_text: r#"
+                import DefaultPage, { ProfilePage as UserProfile } from "./ProfilePage";
+                import * as UI from "./ui";
+
+                export { UserProfile as Profile };
+                export { Header } from "./Header";
+                export * from "./shared";
+                export default function ModulePage() {
+                    return <DefaultPage />;
+                }
+            "#
+            .to_string(),
+        };
+
+        let file_facts = collect_file_facts(&source_file);
+
+        assert_eq!(file_facts.module_imports.len(), 3);
+        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+            import_symbol.local_name == "DefaultPage"
+                && import_symbol.kind == ImportKind::Default
+                && import_symbol.source_module == "./ProfilePage"
+        }));
+        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+            import_symbol.local_name == "UserProfile"
+                && import_symbol.kind == ImportKind::Named
+                && import_symbol.imported_name.as_deref() == Some("ProfilePage")
+        }));
+        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+            import_symbol.local_name == "UI"
+                && import_symbol.kind == ImportKind::Namespace
+                && import_symbol.source_module == "./ui"
+        }));
+
+        assert_eq!(file_facts.module_exports.len(), 4);
+        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+            export_symbol.export_name == "Profile"
+                && export_symbol.local_name.as_deref() == Some("UserProfile")
+                && export_symbol.kind == ExportKind::Named
+                && export_symbol.source_module.is_none()
+        }));
+        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+            export_symbol.export_name == "Header"
+                && export_symbol.local_name.as_deref() == Some("Header")
+                && export_symbol.kind == ExportKind::Named
+                && export_symbol.source_module.as_deref() == Some("./Header")
+        }));
+        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+            export_symbol.export_name == "*"
+                && export_symbol.kind == ExportKind::ReExportAll
+                && export_symbol.source_module.as_deref() == Some("./shared")
+        }));
+        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+            export_symbol.export_name == "default" && export_symbol.kind == ExportKind::Default
+        }));
     }
 }

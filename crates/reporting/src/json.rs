@@ -100,6 +100,26 @@ fn normalize_file_facts(file_facts: &mut FileFacts) {
         .sort_by(|left_component, right_component| left_component.name.cmp(&right_component.name));
 
     file_facts
+        .module_imports
+        .sort_by(|left_import, right_import| {
+            left_import
+                .source_module
+                .cmp(&right_import.source_module)
+                .then_with(|| left_import.local_name.cmp(&right_import.local_name))
+                .then_with(|| left_import.imported_name.cmp(&right_import.imported_name))
+        });
+
+    file_facts
+        .module_exports
+        .sort_by(|left_export, right_export| {
+            left_export
+                .export_name
+                .cmp(&right_export.export_name)
+                .then_with(|| left_export.local_name.cmp(&right_export.local_name))
+                .then_with(|| left_export.source_module.cmp(&right_export.source_module))
+        });
+
+    file_facts
         .providers
         .sort_by(|left_provider, right_provider| {
             left_provider
@@ -132,9 +152,9 @@ fn normalize_file_facts(file_facts: &mut FileFacts) {
 #[cfg(test)]
 mod tests {
     use context_analyzer_core::model::{
-        ComponentDef, ComponentId, ComponentNode, ConsumerUse, ContextDef, ContextRef, FileFacts,
-        FunctionOwnerKind, ProjectFacts, ProviderUse, RenderEdge, ResolvedRenderEdge, Span,
-        UnresolvedRenderEdge,
+        ComponentDef, ComponentId, ComponentNode, ConsumerUse, ContextDef, ContextRef, ExportKind,
+        ExportSymbol, FileFacts, FunctionOwnerKind, ImportKind, ImportSymbol, ProjectFacts,
+        ProviderUse, RenderEdge, ResolvedRenderEdge, Span, UnresolvedRenderEdge,
     };
 
     use super::{to_json_compact, to_json_pretty};
@@ -183,6 +203,22 @@ mod tests {
         assert!(json_value.get("diagnostics").is_none());
     }
 
+    #[test]
+    fn json_does_not_include_raw_module_import_or_export_lists() {
+        let project_facts = build_project_facts(vec!["src/App.tsx"]);
+        let json_output = to_json_pretty(&project_facts).expect("json should serialize");
+        let json_value: serde_json::Value =
+            serde_json::from_str(&json_output).expect("json should parse");
+
+        let files = json_value["files"]
+            .as_array()
+            .expect("files should be an array");
+        let first_file = files.first().expect("fixture should contain one file");
+
+        assert!(first_file.get("module_imports").is_none());
+        assert!(first_file.get("module_exports").is_none());
+    }
+
     fn build_project_facts(file_paths: Vec<&str>) -> ProjectFacts {
         let mut files = Vec::new();
 
@@ -203,6 +239,38 @@ mod tests {
                     name: "App".to_string(),
                     span: Span::new(31, 40),
                 }],
+                module_imports: vec![
+                    ImportSymbol {
+                        source_module: "./zebra".to_string(),
+                        local_name: "ZebraPage".to_string(),
+                        imported_name: Some("ZebraPage".to_string()),
+                        kind: ImportKind::Named,
+                        is_type_only: false,
+                    },
+                    ImportSymbol {
+                        source_module: "./alpha".to_string(),
+                        local_name: "DefaultAlpha".to_string(),
+                        imported_name: Some("default".to_string()),
+                        kind: ImportKind::Default,
+                        is_type_only: false,
+                    },
+                ],
+                module_exports: vec![
+                    ExportSymbol {
+                        export_name: "App".to_string(),
+                        local_name: Some("App".to_string()),
+                        source_module: None,
+                        kind: ExportKind::Named,
+                        is_type_only: false,
+                    },
+                    ExportSymbol {
+                        export_name: "default".to_string(),
+                        local_name: Some("App".to_string()),
+                        source_module: None,
+                        kind: ExportKind::Default,
+                        is_type_only: false,
+                    },
+                ],
                 providers: vec![ProviderUse {
                     context_ref: ContextRef {
                         symbol: "ThemeContext".to_string(),
