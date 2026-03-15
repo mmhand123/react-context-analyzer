@@ -166,7 +166,7 @@ dependencies = [
  "context-analyzer-core",
  "context-analyzer-engine",
  "context-analyzer-frontend",
- "context-analyzer-report",
+ "context-analyzer-reporting",
  "serde_json",
 ]
 
@@ -224,7 +224,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "context-analyzer-report"
+name = "context-analyzer-reporting"
 version = "0.1.0"
 dependencies = [
  "context-analyzer-core",

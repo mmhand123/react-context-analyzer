@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use context_analyzer_engine::collect::collect_project_facts;
 use context_analyzer_frontend::load_source_files;
-use context_analyzer_report::json::{to_json_compact, to_json_pretty};
+use context_analyzer_reporting::json::{to_json_compact, to_json_pretty};
 
 #[derive(Debug, Parser)]
 #[command(name = "cli")]

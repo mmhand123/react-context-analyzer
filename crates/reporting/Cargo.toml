@@ -1,10 +1,10 @@
 [package]
-name = "context-analyzer-report"
+name = "context-analyzer-reporting"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "context_analyzer_report"
+name = "context_analyzer_reporting"
 path = "src/lib.rs"
 
 [dependencies]
