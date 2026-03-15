@@ -2,6 +2,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
+
 const SUPPORTED_EXTENSIONS: [&str; 4] = ["js", "jsx", "ts", "tsx"];
 
 #[derive(Debug)]
@@ -47,7 +49,23 @@ pub fn discover_source_file_paths(root_path: &Path) -> Result<Vec<PathBuf>, Disc
     }
 
     let mut discovered_paths = Vec::new();
-    collect_source_files_recursively(root_path, &mut discovered_paths)?;
+    let mut directories_to_visit = vec![root_path.to_path_buf()];
+
+    while !directories_to_visit.is_empty() {
+        let directory_scan_results = directories_to_visit
+            .par_iter()
+            .map(|directory_path| scan_directory_entries(directory_path))
+            .collect::<Vec<_>>();
+
+        directories_to_visit = Vec::new();
+
+        for directory_scan_result in directory_scan_results {
+            let directory_scan_result = directory_scan_result?;
+            directories_to_visit.extend(directory_scan_result.subdirectories);
+            discovered_paths.extend(directory_scan_result.source_files);
+        }
+    }
+
     discovered_paths.sort();
     Ok(discovered_paths)
 }
@@ -61,16 +79,24 @@ pub fn is_supported_source_file(path: &Path) -> bool {
     }
 }
 
-fn collect_source_files_recursively(
+#[derive(Debug)]
+struct DirectoryScanResult {
+    subdirectories: Vec<PathBuf>,
+    source_files: Vec<PathBuf>,
+}
+
+fn scan_directory_entries(
     directory_path: &Path,
-    discovered_paths: &mut Vec<PathBuf>,
-) -> Result<(), DiscoverFilesError> {
+) -> Result<DirectoryScanResult, DiscoverFilesError> {
     let directory_entries = fs::read_dir(directory_path).map_err(|source_error| {
         DiscoverFilesError::ReadDirectoryFailed {
             path: directory_path.to_path_buf(),
             source: source_error,
         }
     })?;
+
+    let mut subdirectories = Vec::new();
+    let mut source_files = Vec::new();
 
     for directory_entry_result in directory_entries {
         let directory_entry = directory_entry_result.map_err(|source_error| {
@@ -89,16 +115,19 @@ fn collect_source_files_recursively(
         })?;
 
         if file_type.is_dir() {
-            collect_source_files_recursively(&entry_path, discovered_paths)?;
+            subdirectories.push(entry_path);
             continue;
         }
 
         if file_type.is_file() && is_supported_source_file(&entry_path) {
-            discovered_paths.push(entry_path);
+            source_files.push(entry_path);
         }
     }
 
-    Ok(())
+    Ok(DirectoryScanResult {
+        subdirectories,
+        source_files,
+    })
 }
 
 #[cfg(test)]
