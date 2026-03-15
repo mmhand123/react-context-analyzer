@@ -9,3 +9,4 @@ path = "src/lib.rs"
 
 [dependencies]
 context-analyzer-core = { path = "../core" }
+serde_json = "1.0"
