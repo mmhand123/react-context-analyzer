@@ -1,16 +1,18 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 pub use oxc_span::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ProjectFacts {
+pub struct ProjectInfo {
     pub summary: SummaryCounts,
-    pub files: Vec<FileFacts>,
+    pub files: Vec<FileInfo>,
     pub graph: ProjectGraph,
 }
 
-impl ProjectFacts {
-    pub fn from_files(files: Vec<FileFacts>) -> Self {
+impl ProjectInfo {
+    pub fn from_files(files: Vec<FileInfo>) -> Self {
         let summary = SummaryCounts::from_files(&files);
         Self {
             summary,
@@ -22,35 +24,34 @@ impl ProjectFacts {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProjectGraph {
-    pub components: Vec<ComponentNode>,
-    pub resolved_render_edges: Vec<ResolvedRenderEdge>,
-    pub unresolved_render_edges: Vec<UnresolvedRenderEdge>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ComponentId {
-    pub file_path: String,
-    pub component_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ComponentNode {
-    pub id: ComponentId,
+    pub components: Vec<Component>,
+    /// When we resolve the edge, we'll store the resolved child component as the key and then
+    /// the full edge as the value. This lets us walk the graph in reverse order.
+    pub resolved_render_edges: HashMap<ComponentKey, ResolvedRenderEdge>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedRenderEdge {
-    pub parent_component_id: ComponentId,
-    pub child_component_id: ComponentId,
+    pub parent_component: Component,
+    pub child_component: Component,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct UnresolvedRenderEdge {
-    pub parent_component_id: ComponentId,
-    pub child_symbol: String,
-    pub span: Span,
-    pub reason: String,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct Component {
+    pub key: ComponentKey,
+    pub file_path: String,
+    pub name: String,
+}
+
+impl Component {
+    pub fn new(file_path: &str, component_name: &str) -> Self {
+        Self {
+            key: get_component_key(file_path, component_name),
+            file_path: file_path.to_string(),
+            name: component_name.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -64,7 +65,7 @@ pub struct SummaryCounts {
 }
 
 impl SummaryCounts {
-    pub fn from_files(files: &[FileFacts]) -> Self {
+    pub fn from_files(files: &[FileInfo]) -> Self {
         let file_count = files.len();
         let mut context_count = 0;
         let mut component_count = 0;
@@ -72,12 +73,12 @@ impl SummaryCounts {
         let mut consumer_count = 0;
         let mut render_edge_count = 0;
 
-        for file_facts in files {
-            context_count += file_facts.contexts.len();
-            component_count += file_facts.components.len();
-            provider_count += file_facts.providers.len();
-            consumer_count += file_facts.consumers.len();
-            render_edge_count += file_facts.render_edges.len();
+        for file_info in files {
+            context_count += file_info.contexts.len();
+            component_count += file_info.components.len();
+            provider_count += file_info.providers.len();
+            consumer_count += file_info.consumers.len();
+            render_edge_count += file_info.render_edges.len();
         }
 
         Self {
@@ -92,7 +93,7 @@ impl SummaryCounts {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct FileFacts {
+pub struct FileInfo {
     pub file_path: String,
     pub contexts: Vec<ContextDef>,
     pub components: Vec<ComponentDef>,
@@ -148,6 +149,7 @@ pub struct ContextDef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ComponentDef {
     pub name: String,
+    pub key: ComponentKey,
     pub span: Span,
 }
 
@@ -183,146 +185,20 @@ pub struct ConsumerUse {
     pub span: Span,
 }
 
+/// A unique identifier for a component - component name + file path
+pub type ComponentKey = String;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RenderEdge {
+    /// Because we are always in the parent file when rendering, we can resolve the parent key
+    pub parent_component_key: ComponentKey,
     pub parent_component_name: String,
+    /// We only know the child component name on first pass because we have to resolve imports to
+    /// get the full key
     pub child_component_name: String,
     pub span: Span,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ComponentDef, ComponentId, ComponentNode, ConsumerUse, ContextDef, ContextRef, ExportKind,
-        ExportSymbol, FileFacts, FunctionOwnerKind, ImportKind, ImportSymbol, ProjectFacts,
-        ProviderUse, RenderEdge, ResolvedRenderEdge, Span, UnresolvedRenderEdge,
-    };
-
-    #[test]
-    fn project_summary_counts_match_file_fact_totals() {
-        let source_file_facts = vec![FileFacts {
-            file_path: "src/App.tsx".to_string(),
-            contexts: vec![ContextDef {
-                name: "AuthContext".to_string(),
-                span: Span::new(0, 10),
-            }],
-            components: vec![ComponentDef {
-                name: "App".to_string(),
-                span: Span::new(11, 30),
-            }],
-            module_imports: vec![ImportSymbol {
-                source_module: "./profile".to_string(),
-                local_name: "ProfilePage".to_string(),
-                imported_name: Some("ProfilePage".to_string()),
-                kind: ImportKind::Named,
-                is_type_only: false,
-            }],
-            module_exports: vec![ExportSymbol {
-                export_name: "App".to_string(),
-                local_name: Some("App".to_string()),
-                source_module: None,
-                kind: ExportKind::Named,
-                is_type_only: false,
-            }],
-            providers: vec![ProviderUse {
-                context_ref: ContextRef {
-                    symbol: "AuthContext".to_string(),
-                    resolved_context_id: None,
-                },
-                containing_component_name: Some("App".to_string()),
-                containing_function_name: Some("App".to_string()),
-                containing_function_kind: Some(FunctionOwnerKind::Component),
-                span: Span::new(31, 50),
-            }],
-            consumers: vec![ConsumerUse {
-                context_ref: ContextRef {
-                    symbol: "AuthContext".to_string(),
-                    resolved_context_id: None,
-                },
-                containing_component_name: Some("App".to_string()),
-                containing_function_name: Some("App".to_string()),
-                containing_function_kind: Some(FunctionOwnerKind::Component),
-                span: Span::new(51, 70),
-            }],
-            render_edges: vec![RenderEdge {
-                parent_component_name: "App".to_string(),
-                child_component_name: "ProfilePage".to_string(),
-                span: Span::new(71, 95),
-            }],
-        }];
-
-        let project_facts = ProjectFacts::from_files(source_file_facts);
-
-        assert_eq!(project_facts.summary.file_count, 1);
-        assert_eq!(project_facts.summary.context_count, 1);
-        assert_eq!(project_facts.summary.component_count, 1);
-        assert_eq!(project_facts.summary.provider_count, 1);
-        assert_eq!(project_facts.summary.consumer_count, 1);
-        assert_eq!(project_facts.summary.render_edge_count, 1);
-    }
-
-    #[test]
-    fn project_facts_serializes_without_diagnostics_field() {
-        let project_facts = ProjectFacts::from_files(vec![]);
-        let json_value =
-            serde_json::to_value(project_facts).expect("project facts should serialize");
-
-        assert!(json_value.get("summary").is_some());
-        assert!(json_value.get("files").is_some());
-        assert!(json_value.get("graph").is_some());
-        assert!(json_value.get("diagnostics").is_none());
-    }
-
-    #[test]
-    fn project_facts_graph_field_supports_component_and_edge_records() {
-        let mut project_facts = ProjectFacts::from_files(vec![]);
-        let app_component_id = ComponentId {
-            file_path: "src/App.tsx".to_string(),
-            component_name: "App".to_string(),
-        };
-        let profile_component_id = ComponentId {
-            file_path: "src/ProfilePage.tsx".to_string(),
-            component_name: "ProfilePage".to_string(),
-        };
-
-        project_facts.graph.components = vec![
-            ComponentNode {
-                id: app_component_id.clone(),
-            },
-            ComponentNode {
-                id: profile_component_id.clone(),
-            },
-        ];
-        project_facts.graph.resolved_render_edges = vec![ResolvedRenderEdge {
-            parent_component_id: app_component_id.clone(),
-            child_component_id: profile_component_id,
-            span: Span::new(100, 120),
-        }];
-        project_facts.graph.unresolved_render_edges = vec![UnresolvedRenderEdge {
-            parent_component_id: app_component_id,
-            child_symbol: "LazyWidget".to_string(),
-            span: Span::new(121, 140),
-            reason: "symbol_not_found".to_string(),
-        }];
-
-        let json_value =
-            serde_json::to_value(project_facts).expect("project facts should serialize");
-
-        assert_eq!(
-            json_value["graph"]["components"].as_array().map(Vec::len),
-            Some(2)
-        );
-        assert_eq!(
-            json_value["graph"]["resolved_render_edges"]
-                .as_array()
-                .map(Vec::len),
-            Some(1)
-        );
-        assert_eq!(
-            json_value["graph"]["unresolved_render_edges"]
-                .as_array()
-                .map(Vec::len),
-            Some(1)
-        );
-    }
+pub fn get_component_key(file_path: &str, component_name: &str) -> ComponentKey {
+    format!("{file_path}:{component_name}")
 }

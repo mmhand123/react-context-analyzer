@@ -3,9 +3,12 @@ use crate::function_name::{
     extract_component_name_from_variable_declarator, extract_declared_function_name,
     extract_function_name_from_variable_declarator, extract_jsx_component_name,
 };
+use crate::link::build_project_graph;
+use crate::paths::normalize_file_path_string;
 use context_analyzer_core::model::{
-    ComponentDef, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol, FileFacts,
-    FunctionOwnerKind, ImportKind, ImportSymbol, ProjectFacts, ProviderUse, RenderEdge,
+    ComponentDef, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol, FileInfo,
+    FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse, RenderEdge,
+    get_component_key,
 };
 use context_analyzer_frontend::SourceFileInput;
 use oxc_allocator::Allocator;
@@ -22,30 +25,35 @@ use oxc_syntax::scope::ScopeFlags;
 use rayon::prelude::*;
 use std::path::Path;
 
-pub fn collect_project_facts(source_files: &[SourceFileInput]) -> ProjectFacts {
-    let files: Vec<FileFacts> = source_files.par_iter().map(collect_file_facts).collect();
+pub fn collect_project_info(source_files: &[SourceFileInput]) -> ProjectInfo {
+    let files: Vec<FileInfo> = source_files.par_iter().map(collect_file_info).collect();
+    let graph = build_project_graph(&files);
 
-    ProjectFacts::from_files(files)
+    let mut project_info = ProjectInfo::from_files(files);
+    project_info.graph = graph;
+    project_info
 }
 
-pub fn collect_file_facts(source_file: &SourceFileInput) -> FileFacts {
+pub fn collect_file_info(source_file: &SourceFileInput) -> FileInfo {
     let source_type = match SourceType::from_path(Path::new(&source_file.path)) {
         Ok(source_type) => source_type,
-        Err(_) => return empty_file_facts(&source_file.path),
+        Err(_) => return empty_file_info(&source_file.path),
     };
 
     let allocator = Allocator::default();
     let parser_output = Parser::new(&allocator, &source_file.source_text, source_type).parse();
 
     if !parser_output.errors.is_empty() {
-        return empty_file_facts(&source_file.path);
+        return empty_file_info(&source_file.path);
     }
 
-    let mut collector = AstCollector::default();
+    let file_path = source_file.path.to_string_lossy().to_string();
+
+    let mut collector = AstCollector::new(&file_path);
     collector.visit_program(&parser_output.program);
 
-    FileFacts {
-        file_path: source_file.path.to_string_lossy().to_string(),
+    FileInfo {
+        file_path: file_path,
         contexts: collector.contexts,
         components: collector.components,
         module_imports: collector.module_imports,
@@ -56,8 +64,8 @@ pub fn collect_file_facts(source_file: &SourceFileInput) -> FileFacts {
     }
 }
 
-fn empty_file_facts(file_path: &std::path::Path) -> FileFacts {
-    FileFacts {
+fn empty_file_info(file_path: &std::path::Path) -> FileInfo {
+    FileInfo {
         file_path: file_path.to_string_lossy().to_string(),
         contexts: Vec::new(),
         components: Vec::new(),
@@ -80,6 +88,16 @@ struct AstCollector {
     render_edges: Vec<RenderEdge>,
     component_stack: Vec<String>,
     function_owner_stack: Vec<FunctionOwnerFrame>,
+    file_path: String,
+}
+
+impl AstCollector {
+    fn new(file_path: &str) -> Self {
+        Self {
+            file_path: normalize_file_path_string(file_path),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +224,7 @@ impl<'a> Visit<'a> for AstCollector {
             if owner_kind == FunctionOwnerKind::Component {
                 self.components.push(ComponentDef {
                     name: function_name.clone(),
+                    key: get_component_key(&self.file_path, &function_name),
                     span: function_node.span,
                 });
                 self.component_stack.push(function_name.clone());
@@ -228,6 +247,7 @@ impl<'a> Visit<'a> for AstCollector {
         if let Some(component_name) = extract_component_name_from_function(function_node) {
             self.components.push(ComponentDef {
                 name: component_name.clone(),
+                key: get_component_key(&self.file_path, &component_name),
                 span: function_node.span,
             });
             self.component_stack.push(component_name);
@@ -259,6 +279,7 @@ impl<'a> Visit<'a> for AstCollector {
             {
                 self.components.push(ComponentDef {
                     name: component_name.clone(),
+                    key: get_component_key(&self.file_path, &component_name),
                     span: binding_identifier.span,
                 });
                 self.component_stack.push(component_name);
@@ -326,6 +347,7 @@ impl<'a> Visit<'a> for AstCollector {
             && child_component_name != *current_component_name
         {
             self.render_edges.push(RenderEdge {
+                parent_component_key: get_component_key(&self.file_path, current_component_name),
                 parent_component_name: current_component_name.clone(),
                 child_component_name,
                 span: opening_element.span,
@@ -470,10 +492,10 @@ mod tests {
     use context_analyzer_core::model::{ExportKind, FunctionOwnerKind, ImportKind};
     use context_analyzer_frontend::SourceFileInput;
 
-    use super::{collect_file_facts, collect_project_facts};
+    use super::{collect_file_info, collect_project_info};
 
     #[test]
-    fn collect_file_facts_extracts_context_component_provider_consumer_and_render_edges() {
+    fn collect_file_info_extracts_context_component_provider_consumer_and_render_edges() {
         let source_file = SourceFileInput {
             path: PathBuf::from("src/App.tsx"),
             source_text: r#"
@@ -497,105 +519,105 @@ mod tests {
             .to_string(),
         };
 
-        let file_facts = collect_file_facts(&source_file);
+        let file_info = collect_file_info(&source_file);
 
-        assert_eq!(file_facts.contexts.len(), 1);
-        assert_eq!(file_facts.contexts[0].name, "AuthContext");
+        assert_eq!(file_info.contexts.len(), 1);
+        assert_eq!(file_info.contexts[0].name, "AuthContext");
 
-        assert_eq!(file_facts.components.len(), 2);
+        assert_eq!(file_info.components.len(), 2);
         assert!(
-            file_facts
+            file_info
                 .components
                 .iter()
                 .any(|component| component.name == "App")
         );
         assert!(
-            file_facts
+            file_info
                 .components
                 .iter()
                 .any(|component| component.name == "ProfilePage")
         );
 
-        assert_eq!(file_facts.providers.len(), 1);
-        assert_eq!(file_facts.providers[0].context_ref.symbol, "AuthContext");
+        assert_eq!(file_info.providers.len(), 1);
+        assert_eq!(file_info.providers[0].context_ref.symbol, "AuthContext");
         assert_eq!(
-            file_facts.providers[0].containing_component_name,
+            file_info.providers[0].containing_component_name,
             Some("App".to_string())
         );
 
-        assert_eq!(file_facts.consumers.len(), 1);
-        assert_eq!(file_facts.consumers[0].context_ref.symbol, "AuthContext");
+        assert_eq!(file_info.consumers.len(), 1);
+        assert_eq!(file_info.consumers[0].context_ref.symbol, "AuthContext");
         assert_eq!(
-            file_facts.consumers[0].containing_component_name,
+            file_info.consumers[0].containing_component_name,
             Some("App".to_string())
         );
 
-        assert_eq!(file_facts.render_edges.len(), 3);
+        assert_eq!(file_info.render_edges.len(), 3);
         assert!(
-            file_facts
+            file_info
                 .render_edges
                 .iter()
                 .any(|edge| edge.parent_component_name == "App"
                     && edge.child_component_name == "AuthContext.Provider")
         );
         assert!(
-            file_facts
+            file_info
                 .render_edges
                 .iter()
                 .any(|edge| edge.parent_component_name == "App"
                     && edge.child_component_name == "ProfilePage")
         );
         assert!(
-            file_facts
+            file_info
                 .render_edges
                 .iter()
                 .any(|edge| edge.parent_component_name == "ProfilePage"
                     && edge.child_component_name == "Header")
         );
 
-        assert_eq!(file_facts.module_imports.len(), 3);
-        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+        assert_eq!(file_info.module_imports.len(), 3);
+        assert!(file_info.module_imports.iter().any(|import_symbol| {
             import_symbol.source_module == "react"
                 && import_symbol.local_name == "React"
                 && import_symbol.imported_name.as_deref() == Some("default")
                 && import_symbol.kind == ImportKind::Default
         }));
-        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+        assert!(file_info.module_imports.iter().any(|import_symbol| {
             import_symbol.source_module == "react"
                 && import_symbol.local_name == "createContext"
                 && import_symbol.imported_name.as_deref() == Some("createContext")
                 && import_symbol.kind == ImportKind::Named
         }));
-        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+        assert!(file_info.module_imports.iter().any(|import_symbol| {
             import_symbol.source_module == "react"
                 && import_symbol.local_name == "useContext"
                 && import_symbol.imported_name.as_deref() == Some("useContext")
                 && import_symbol.kind == ImportKind::Named
         }));
 
-        assert!(file_facts.module_exports.is_empty());
+        assert!(file_info.module_exports.is_empty());
     }
 
     #[test]
-    fn collect_file_facts_returns_empty_collections_for_parse_failures() {
+    fn collect_file_info_returns_empty_collections_for_parse_failures() {
         let source_file = SourceFileInput {
             path: PathBuf::from("src/Broken.tsx"),
             source_text: "const = ;".to_string(),
         };
 
-        let file_facts = collect_file_facts(&source_file);
+        let file_info = collect_file_info(&source_file);
 
-        assert!(file_facts.contexts.is_empty());
-        assert!(file_facts.components.is_empty());
-        assert!(file_facts.module_imports.is_empty());
-        assert!(file_facts.module_exports.is_empty());
-        assert!(file_facts.providers.is_empty());
-        assert!(file_facts.consumers.is_empty());
-        assert!(file_facts.render_edges.is_empty());
+        assert!(file_info.contexts.is_empty());
+        assert!(file_info.components.is_empty());
+        assert!(file_info.module_imports.is_empty());
+        assert!(file_info.module_exports.is_empty());
+        assert!(file_info.providers.is_empty());
+        assert!(file_info.consumers.is_empty());
+        assert!(file_info.render_edges.is_empty());
     }
 
     #[test]
-    fn collect_project_facts_aggregates_counts_across_files() {
+    fn collect_project_info_aggregates_counts_across_files() {
         let files = vec![
             SourceFileInput {
                 path: PathBuf::from("src/App.tsx"),
@@ -607,13 +629,13 @@ mod tests {
             },
         ];
 
-        let project_facts = collect_project_facts(&files);
+        let project_info = collect_project_info(&files);
 
-        assert_eq!(project_facts.summary.file_count, 2);
-        assert_eq!(project_facts.summary.context_count, 1);
-        assert_eq!(project_facts.summary.component_count, 2);
-        assert_eq!(project_facts.summary.consumer_count, 1);
-        assert_eq!(project_facts.summary.render_edge_count, 1);
+        assert_eq!(project_info.summary.file_count, 2);
+        assert_eq!(project_info.summary.context_count, 1);
+        assert_eq!(project_info.summary.component_count, 2);
+        assert_eq!(project_info.summary.consumer_count, 1);
+        assert_eq!(project_info.summary.render_edge_count, 1);
     }
 
     #[test]
@@ -632,22 +654,22 @@ mod tests {
             .to_string(),
         };
 
-        let file_facts = collect_file_facts(&source_file);
+        let file_info = collect_file_info(&source_file);
 
-        assert_eq!(file_facts.consumers.len(), 1);
+        assert_eq!(file_info.consumers.len(), 1);
         assert_eq!(
-            file_facts.consumers[0].containing_function_name,
+            file_info.consumers[0].containing_function_name,
             Some("useAuth".to_string())
         );
         assert_eq!(
-            file_facts.consumers[0].containing_function_kind,
+            file_info.consumers[0].containing_function_kind,
             Some(FunctionOwnerKind::Hook)
         );
-        assert_eq!(file_facts.consumers[0].containing_component_name, None);
+        assert_eq!(file_info.consumers[0].containing_component_name, None);
     }
 
     #[test]
-    fn collect_file_facts_extracts_import_and_export_symbols() {
+    fn collect_file_info_extracts_import_and_export_symbols() {
         let source_file = SourceFileInput {
             path: PathBuf::from("src/module.tsx"),
             source_text: r#"
@@ -664,44 +686,44 @@ mod tests {
             .to_string(),
         };
 
-        let file_facts = collect_file_facts(&source_file);
+        let file_info = collect_file_info(&source_file);
 
-        assert_eq!(file_facts.module_imports.len(), 3);
-        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+        assert_eq!(file_info.module_imports.len(), 3);
+        assert!(file_info.module_imports.iter().any(|import_symbol| {
             import_symbol.local_name == "DefaultPage"
                 && import_symbol.kind == ImportKind::Default
                 && import_symbol.source_module == "./ProfilePage"
         }));
-        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+        assert!(file_info.module_imports.iter().any(|import_symbol| {
             import_symbol.local_name == "UserProfile"
                 && import_symbol.kind == ImportKind::Named
                 && import_symbol.imported_name.as_deref() == Some("ProfilePage")
         }));
-        assert!(file_facts.module_imports.iter().any(|import_symbol| {
+        assert!(file_info.module_imports.iter().any(|import_symbol| {
             import_symbol.local_name == "UI"
                 && import_symbol.kind == ImportKind::Namespace
                 && import_symbol.source_module == "./ui"
         }));
 
-        assert_eq!(file_facts.module_exports.len(), 4);
-        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+        assert_eq!(file_info.module_exports.len(), 4);
+        assert!(file_info.module_exports.iter().any(|export_symbol| {
             export_symbol.export_name == "Profile"
                 && export_symbol.local_name.as_deref() == Some("UserProfile")
                 && export_symbol.kind == ExportKind::Named
                 && export_symbol.source_module.is_none()
         }));
-        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+        assert!(file_info.module_exports.iter().any(|export_symbol| {
             export_symbol.export_name == "Header"
                 && export_symbol.local_name.as_deref() == Some("Header")
                 && export_symbol.kind == ExportKind::Named
                 && export_symbol.source_module.as_deref() == Some("./Header")
         }));
-        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+        assert!(file_info.module_exports.iter().any(|export_symbol| {
             export_symbol.export_name == "*"
                 && export_symbol.kind == ExportKind::ReExportAll
                 && export_symbol.source_module.as_deref() == Some("./shared")
         }));
-        assert!(file_facts.module_exports.iter().any(|export_symbol| {
+        assert!(file_info.module_exports.iter().any(|export_symbol| {
             export_symbol.export_name == "default" && export_symbol.kind == ExportKind::Default
         }));
     }

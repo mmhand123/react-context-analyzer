@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use context_analyzer_engine::collect::collect_project_facts;
+use context_analyzer_engine::collect::collect_project_info;
 use context_analyzer_frontend::load_source_files;
 use context_analyzer_reporting::json::{to_json_compact, to_json_pretty};
 
@@ -29,14 +29,13 @@ fn run() -> Result<(), String> {
     let source_files = load_source_files(&cli_args.project_path)
         .map_err(|error| format!("failed to load source files: {error}"))?;
 
-    let project_facts = collect_project_facts(&source_files);
+    let project_info = collect_project_info(&source_files);
 
     let output_json = if cli_args.pretty {
-        to_json_pretty(&project_facts)
+        to_json_pretty(&project_info)
             .map_err(|error| format!("failed to render pretty json: {error}"))?
     } else {
-        to_json_compact(&project_facts)
-            .map_err(|error| format!("failed to render json: {error}"))?
+        to_json_compact(&project_info).map_err(|error| format!("failed to render json: {error}"))?
     };
 
     println!("{output_json}");
