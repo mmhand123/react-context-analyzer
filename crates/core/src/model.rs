@@ -31,7 +31,7 @@ pub struct ProjectGraph {
     pub components_by_key: HashMap<ComponentKey, Component>,
     /// When we resolve the edge, we'll store the resolved child component as the key and then
     /// the full edge as the value. This lets us walk the graph in reverse order.
-    pub resolved_render_edges: HashMap<ComponentKey, ResolvedRenderEdge>,
+    pub resolved_render_edges: Vec<ResolvedRenderEdge>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -44,18 +44,23 @@ pub struct ResolvedRenderEdge {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct Component {
     pub node_id: usize,
-    pub key: ComponentKey,
     pub file_path: String,
     pub name: String,
+    pub span: Span,
 }
 
 impl Component {
-    pub fn new(file_path: &str, component_name: &str, node_id: ComponentNodeId) -> Self {
+    pub fn new(
+        file_path: &str,
+        component_name: &str,
+        node_id: ComponentNodeId,
+        span: Span,
+    ) -> Self {
         Self {
             node_id,
-            key: get_component_key(file_path, component_name),
             file_path: file_path.to_string(),
             name: component_name.to_string(),
+            span,
         }
     }
 }
@@ -199,7 +204,7 @@ pub type ComponentKey = (FilePath, ComponentName);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UnresolvedRenderEdge {
-    pub parent_node_id: usize,
+    pub parent_component_name: String,
     /// We only know the child render symbol on first pass
     pub child_rendered_symbol: String,
     pub parent_jsx_symbol: String,

@@ -4,7 +4,6 @@ use crate::function_name::{
     extract_function_name_from_variable_declarator, extract_jsx_component_name,
 };
 use crate::link::build_project_graph;
-use crate::paths::normalize_file_path_string;
 use context_analyzer_core::model::{
     ComponentDef, ComponentNodeId, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol,
     FileInfo, FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse,
@@ -49,7 +48,7 @@ pub fn collect_file_info(source_file: &SourceFileInput) -> FileInfo {
 
     let file_path = source_file.path.to_string_lossy().to_string();
 
-    let mut collector = AstCollector::new(&file_path);
+    let mut collector = AstCollector::new();
     collector.visit_program(&parser_output.program);
 
     FileInfo {
@@ -91,13 +90,11 @@ struct AstCollector {
     component_stack: Vec<ComponentNodeId>,
     jsx_symbol_stack: Vec<String>,
     function_owner_stack: Vec<FunctionOwnerFrame>,
-    file_path: String,
 }
 
 impl AstCollector {
-    fn new(file_path: &str) -> Self {
+    fn new() -> Self {
         Self {
-            file_path: normalize_file_path_string(file_path),
             ..Default::default()
         }
     }
@@ -221,7 +218,7 @@ impl<'a> Visit<'a> for AstCollector {
     }
 
     fn visit_function(&mut self, function_node: &Function<'a>, flags: ScopeFlags) {
-        let next_component_node_id = self.components.len() + 1;
+        let next_component_node_id = self.components.len();
         if let Some(function_name) = extract_declared_function_name(function_node) {
             let owner_kind = classify_function_owner_kind(&function_name);
 
@@ -263,7 +260,7 @@ impl<'a> Visit<'a> for AstCollector {
     }
 
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
-        let next_component_node_id = self.components.len() + 1;
+        let next_component_node_id = self.components.len();
         let Some(binding_identifier) = declarator.id.get_binding_identifier() else {
             walk::walk_variable_declarator(self, declarator);
             return;
@@ -335,26 +332,9 @@ impl<'a> Visit<'a> for AstCollector {
         walk::walk_call_expression(self, call_expression);
     }
 
-    fn visit_jsx_opening_element(&mut self, jsx_element: &JSXOpeningElement<'a>) {
-        if let Some(_) = extract_jsx_component_name(&jsx_element.name) {
-            self.jsx_symbol_stack.push(jsx_element.name.to_string());
-        }
-
-        walk::walk_jsx_opening_element(self, jsx_element);
-    }
-
-    fn visit_jsx_closing_element(&mut self, jsx_element: &JSXClosingElement<'a>) {
-        if let Some(current_jsx_symbol) = self.jsx_symbol_stack.last()
-            && current_jsx_symbol.to_string() == jsx_element.name.to_string()
-        {
-            self.jsx_symbol_stack.pop();
-        }
-
-        walk::walk_jsx_closing_element(self, jsx_element);
-    }
-
     fn visit_jsx_element(&mut self, jsx_element: &JSXElement<'a>) {
         let opening_element = &jsx_element.opening_element;
+        let current_jsx_symbol = extract_jsx_component_name(&opening_element.name);
 
         if let Some(provider_symbol) = extract_provider_symbol(opening_element.as_ref()) {
             if let Some(current_component_node_id) = self.component_stack.last() {
@@ -380,18 +360,29 @@ impl<'a> Visit<'a> for AstCollector {
 
             if let Some(child_component_name) = extract_jsx_component_name(&opening_element.name)
                 && child_component_name != *current_component_name
-                && let Some(parent_jsx_symbol) = self.jsx_symbol_stack.last()
             {
+                let parent_jsx_symbol = self
+                    .jsx_symbol_stack
+                    .last()
+                    .unwrap_or(&current_component_name)
+                    .to_string();
+
                 self.unresolved_render_edges.push(UnresolvedRenderEdge {
-                    parent_node_id: *current_component_node_id,
+                    parent_component_name: current_component_name,
                     child_rendered_symbol: child_component_name,
-                    parent_jsx_symbol: parent_jsx_symbol.clone(),
+                    parent_jsx_symbol,
                     span: opening_element.span,
                 });
             }
         }
 
-        walk::walk_jsx_element(self, jsx_element);
+        if let Some(symbol) = current_jsx_symbol {
+            self.jsx_symbol_stack.push(symbol);
+            walk::walk_jsx_element(self, jsx_element);
+            self.jsx_symbol_stack.pop();
+        } else {
+            walk::walk_jsx_element(self, jsx_element);
+        }
     }
 }
 
@@ -589,39 +580,26 @@ mod tests {
             "App".to_string()
         );
 
-        let app_node_id = file_info
-            .components
-            .iter()
-            .find(|component| component.name == "App")
-            .map(|component| component.node_id)
-            .expect("App component should be collected");
-        let profile_page_node_id = file_info
-            .components
-            .iter()
-            .find(|component| component.name == "ProfilePage")
-            .map(|component| component.node_id)
-            .expect("ProfilePage component should be collected");
-
         assert_eq!(file_info.unresolved_render_edges.len(), 3);
         assert!(
             file_info
                 .unresolved_render_edges
                 .iter()
-                .any(|edge| edge.parent_node_id == app_node_id
+                .any(|edge| edge.parent_component_name == "App"
                     && edge.child_rendered_symbol == "AuthContext.Provider")
         );
         assert!(
             file_info
                 .unresolved_render_edges
                 .iter()
-                .any(|edge| edge.parent_node_id == app_node_id
+                .any(|edge| edge.parent_component_name == "App"
                     && edge.child_rendered_symbol == "ProfilePage")
         );
         assert!(
             file_info
                 .unresolved_render_edges
                 .iter()
-                .any(|edge| edge.parent_node_id == profile_page_node_id
+                .any(|edge| edge.parent_component_name == "ProfilePage"
                     && edge.child_rendered_symbol == "Header")
         );
 
@@ -646,6 +624,56 @@ mod tests {
         }));
 
         assert!(file_info.module_exports.is_empty());
+    }
+
+    #[test]
+    fn collect_file_info_preserves_parent_jsx_symbol_for_self_closing_siblings() {
+        let source_file = SourceFileInput {
+            path: PathBuf::from("src/App.tsx"),
+            source_text: r#"
+                function App() {
+                    return (
+                        <Layout>
+                            <First />
+                            <Second />
+                        </Layout>
+                    );
+                }
+
+                function Layout({ children }) {
+                    return <section>{children}</section>;
+                }
+
+                function First() {
+                    return <div />;
+                }
+
+                function Second() {
+                    return <div />;
+                }
+            "#
+            .to_string(),
+        };
+
+        let file_info = collect_file_info(&source_file);
+
+        let first_edge = file_info
+            .unresolved_render_edges
+            .iter()
+            .find(|edge| {
+                edge.parent_component_name == "App" && edge.child_rendered_symbol == "First"
+            })
+            .expect("expected unresolved render edge App -> First");
+        assert_eq!(first_edge.parent_jsx_symbol, "Layout");
+
+        let second_edge = file_info
+            .unresolved_render_edges
+            .iter()
+            .find(|edge| {
+                edge.parent_component_name == "App" && edge.child_rendered_symbol == "Second"
+            })
+            .expect("expected unresolved render edge App -> Second");
+        assert_eq!(second_edge.parent_jsx_symbol, "Layout");
     }
 
     #[test]

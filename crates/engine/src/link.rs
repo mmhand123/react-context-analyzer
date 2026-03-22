@@ -21,58 +21,69 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
     // TODO - ok so what I can do here is go over all the exports like the LLM wanted to,
     // but at the same time as we go over the components (and in parallel still) so that it's much
     // faster. And here we'll gather all the exports related to a file and map them to components
-    let components: HashMap<ComponentKey, Component> = files
+    let components_map: HashMap<ComponentKey, Component> = files
         .par_iter()
-        .flat_map_iter(|file_info| {
-            let components_hash = file_info.components.iter().map(|component_def| {
+        .enumerate()
+        .flat_map_iter(|(file_idx, file_info)| {
+            let components = file_info.components.iter().map(move |component_def| {
+                // When we built the file info we were tracking component node ids per file, but
+                // we need to have the "true" node id for the component across all files
+                let normalized_node_id = component_def.node_id + file_idx + 1;
                 let normalized_file_path = normalize_file_path_string(&file_info.file_path);
 
-                let component = Component::new(&normalized_file_path, &component_def.name);
+                let component = Component::new(
+                    &normalized_file_path,
+                    &component_def.name,
+                    normalized_node_id,
+                    component_def.span,
+                );
 
-                (component.key.clone(), component)
+                (
+                    (normalized_file_path.clone(), component_def.name.clone()),
+                    component,
+                )
             });
 
-            components_hash
+            components
         })
         .collect();
 
-    println!("all components: {:?}\n\n\n\n\n", components);
+    println!("all components: {:?}\n\n\n\n\n", components_map);
 
     // We'd like to do this in parallel but we're going to have to work around sharing the hashmap
     for file_info in files {
         for edge in &file_info.unresolved_render_edges {
             let current_file_path = normalize_file_path_string(&file_info.file_path);
             println!("current_file_path: {:?}", current_file_path);
-            let parent_component = components.get(&edge.parent_component_key);
+            // TODO - figure out all this clone nonsense
+            let parent_component = components_map.get(&(
+                current_file_path.clone(),
+                edge.parent_component_name.clone(),
+            ));
 
             println!("parent component: {:?}", parent_component);
 
-            if parent_component.is_none() {
-                // TODO error handling in general hehe :)
-                continue;
-            }
-
-            if let Some(child_component) = resolve_child_component(
-                file_info,
-                &edge.child_component_name,
-                &resolver,
-                current_file_path,
-            ) {
-                let _ = graph.resolved_render_edges.insert(
-                    child_component.key.clone(),
-                    ResolvedRenderEdge {
-                        parent_component: parent_component.unwrap().clone(),
-                        child_component: child_component,
+            if let Some(parent_component) = parent_component {
+                if let Some(child_component) = resolve_child_component(
+                    file_info,
+                    &edge.child_rendered_symbol,
+                    &resolver,
+                    &current_file_path,
+                    &components_map,
+                ) {
+                    let _ = graph.resolved_render_edges.push(ResolvedRenderEdge {
+                        parent_component_id: parent_component.node_id,
+                        child_component_id: child_component.node_id,
                         span: edge.span,
-                    },
-                );
+                    });
+                }
             }
         }
     }
 
-    graph.components = components
-        .into_iter()
-        .map(|(_, component)| component)
+    graph.components = components_map
+        .iter()
+        .map(|(_, component)| component.clone())
         .collect();
 
     graph
@@ -82,7 +93,8 @@ fn resolve_child_component(
     file_info: &FileInfo,
     child_symbol: &str,
     resolver: &Resolver,
-    current_file_path: String,
+    current_file_path: &String,
+    components_map: &HashMap<ComponentKey, Component>,
 ) -> Option<Component> {
     let import_symbol = file_info.module_imports.iter().find(|import_symbol| {
         import_symbol.local_name == child_symbol && !import_symbol.is_type_only
@@ -102,7 +114,9 @@ fn resolve_child_component(
     println!("export_alias: {:?}", export_alias);
 
     if let Some(export_alias) = export_alias {
-        return Some(Component::new(&resolved_file_path, &export_alias));
+        return components_map
+            .get(&(resolved_file_path, export_alias))
+            .cloned();
     }
 
     match import_symbol.kind {
@@ -113,7 +127,9 @@ fn resolve_child_component(
                 .imported_name
                 .as_deref()
                 .unwrap_or(&import_symbol.local_name);
-            Some(Component::new(&resolved_file_path, imported_name))
+            components_map
+                .get(&(resolved_file_path, imported_name.to_string()))
+                .cloned()
         }
         ImportKind::Namespace => None,
     }
