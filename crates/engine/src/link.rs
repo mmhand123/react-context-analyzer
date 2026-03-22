@@ -40,7 +40,7 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
 
     // We'd like to do this in parallel but we're going to have to work around sharing the hashmap
     for file_info in files {
-        for edge in &file_info.render_edges {
+        for edge in &file_info.unresolved_render_edges {
             let current_file_path = normalize_file_path_string(&file_info.file_path);
             println!("current_file_path: {:?}", current_file_path);
             let parent_component = components.get(&edge.parent_component_key);

@@ -84,7 +84,7 @@ impl SummaryCounts {
             component_count += file_info.components.len();
             provider_count += file_info.providers.len();
             consumer_count += file_info.consumers.len();
-            render_edge_count += file_info.render_edges.len();
+            render_edge_count += file_info.unresolved_render_edges.len();
         }
 
         Self {
@@ -109,7 +109,7 @@ pub struct FileInfo {
     pub module_exports: Vec<ExportSymbol>,
     pub providers: Vec<ProviderUse>,
     pub consumers: Vec<ConsumerUse>,
-    pub render_edges: Vec<UnresolvedRenderEdge>,
+    pub unresolved_render_edges: Vec<UnresolvedRenderEdge>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

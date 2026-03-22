@@ -60,7 +60,7 @@ pub fn collect_file_info(source_file: &SourceFileInput) -> FileInfo {
         module_exports: collector.module_exports,
         providers: collector.providers,
         consumers: collector.consumers,
-        render_edges: collector.unresolved_render_edges,
+        unresolved_render_edges: collector.unresolved_render_edges,
     }
 }
 
@@ -73,7 +73,7 @@ fn empty_file_info(file_path: &std::path::Path) -> FileInfo {
         module_exports: Vec::new(),
         providers: Vec::new(),
         consumers: Vec::new(),
-        render_edges: Vec::new(),
+        unresolved_render_edges: Vec::new(),
     }
 }
 
@@ -602,24 +602,24 @@ mod tests {
             .map(|component| component.node_id)
             .expect("ProfilePage component should be collected");
 
-        assert_eq!(file_info.render_edges.len(), 3);
+        assert_eq!(file_info.unresolved_render_edges.len(), 3);
         assert!(
             file_info
-                .render_edges
+                .unresolved_render_edges
                 .iter()
                 .any(|edge| edge.parent_node_id == app_node_id
                     && edge.child_rendered_symbol == "AuthContext.Provider")
         );
         assert!(
             file_info
-                .render_edges
+                .unresolved_render_edges
                 .iter()
                 .any(|edge| edge.parent_node_id == app_node_id
                     && edge.child_rendered_symbol == "ProfilePage")
         );
         assert!(
             file_info
-                .render_edges
+                .unresolved_render_edges
                 .iter()
                 .any(|edge| edge.parent_node_id == profile_page_node_id
                     && edge.child_rendered_symbol == "Header")
@@ -663,7 +663,7 @@ mod tests {
         assert!(file_info.module_exports.is_empty());
         assert!(file_info.providers.is_empty());
         assert!(file_info.consumers.is_empty());
-        assert!(file_info.render_edges.is_empty());
+        assert!(file_info.unresolved_render_edges.is_empty());
     }
 
     #[test]

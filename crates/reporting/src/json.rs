@@ -75,24 +75,26 @@ fn normalize_file_info(file_info: &mut FileInfo) {
                 .cmp(&right_consumer.context_ref.symbol)
         });
 
-    file_info.render_edges.sort_by(|left_edge, right_edge| {
-        left_edge
-            .parent_component_name
-            .cmp(&right_edge.parent_component_name)
-            .then_with(|| {
-                left_edge
-                    .child_component_name
-                    .cmp(&right_edge.child_component_name)
-            })
-    });
+    file_info
+        .unresolved_render_edges
+        .sort_by(|left_edge, right_edge| {
+            left_edge
+                .parent_component_name
+                .cmp(&right_edge.parent_component_name)
+                .then_with(|| {
+                    left_edge
+                        .child_component_name
+                        .cmp(&right_edge.child_component_name)
+                })
+        });
 }
 
 #[cfg(test)]
 mod tests {
     use context_analyzer_core::model::{
         ComponentDef, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol, FileInfo,
-        FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse, RenderEdge,
-        ResolvedRenderEdge, Span,
+        FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse, ResolvedRenderEdge,
+        Span, UnresolvedRenderEdge,
     };
 
     use super::{to_json_compact, to_json_pretty};
@@ -199,7 +201,7 @@ mod tests {
                     containing_function_kind: Some(FunctionOwnerKind::Component),
                     span: Span::new(51, 60),
                 }],
-                render_edges: vec![RenderEdge {
+                unresolved_render_edges: vec![UnresolvedRenderEdge {
                     parent_component_name: "App".to_string(),
                     child_component_name: "ProfilePage".to_string(),
                     span: Span::new(61, 70),
