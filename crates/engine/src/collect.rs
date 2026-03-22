@@ -6,17 +6,17 @@ use crate::function_name::{
 use crate::link::build_project_graph;
 use crate::paths::normalize_file_path_string;
 use context_analyzer_core::model::{
-    ComponentDef, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol, FileInfo,
-    FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse, RenderEdge,
-    get_component_key,
+    ComponentDef, ComponentNodeId, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol,
+    FileInfo, FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse,
+    UnresolvedRenderEdge,
 };
 use context_analyzer_frontend::SourceFileInput;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, CallExpression, ExportAllDeclaration, ExportDefaultDeclaration,
     ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression, Function, ImportDeclaration,
-    ImportDeclarationSpecifier, JSXAttributeItem, JSXElement, JSXElementName, JSXOpeningElement,
-    ModuleExportName, VariableDeclarator,
+    ImportDeclarationSpecifier, JSXAttributeItem, JSXClosingElement, JSXElement, JSXElementName,
+    JSXOpeningElement, ModuleExportName, VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -60,7 +60,7 @@ pub fn collect_file_info(source_file: &SourceFileInput) -> FileInfo {
         module_exports: collector.module_exports,
         providers: collector.providers,
         consumers: collector.consumers,
-        render_edges: collector.render_edges,
+        render_edges: collector.unresolved_render_edges,
     }
 }
 
@@ -85,8 +85,11 @@ struct AstCollector {
     module_exports: Vec<ExportSymbol>,
     providers: Vec<ProviderUse>,
     consumers: Vec<ConsumerUse>,
-    render_edges: Vec<RenderEdge>,
-    component_stack: Vec<String>,
+    /// On first pass we just collect info about the render edges, but can only know
+    /// the child symbols. We'll have to take a second pass to map to the actual component
+    unresolved_render_edges: Vec<UnresolvedRenderEdge>,
+    component_stack: Vec<ComponentNodeId>,
+    jsx_symbol_stack: Vec<String>,
     function_owner_stack: Vec<FunctionOwnerFrame>,
     file_path: String,
 }
@@ -218,16 +221,17 @@ impl<'a> Visit<'a> for AstCollector {
     }
 
     fn visit_function(&mut self, function_node: &Function<'a>, flags: ScopeFlags) {
+        let next_component_node_id = self.components.len() + 1;
         if let Some(function_name) = extract_declared_function_name(function_node) {
             let owner_kind = classify_function_owner_kind(&function_name);
 
             if owner_kind == FunctionOwnerKind::Component {
                 self.components.push(ComponentDef {
+                    node_id: next_component_node_id,
                     name: function_name.clone(),
-                    key: get_component_key(&self.file_path, &function_name),
                     span: function_node.span,
                 });
-                self.component_stack.push(function_name.clone());
+                self.component_stack.push(next_component_node_id);
             }
 
             self.function_owner_stack.push(FunctionOwnerFrame {
@@ -246,11 +250,11 @@ impl<'a> Visit<'a> for AstCollector {
 
         if let Some(component_name) = extract_component_name_from_function(function_node) {
             self.components.push(ComponentDef {
+                node_id: next_component_node_id,
                 name: component_name.clone(),
-                key: get_component_key(&self.file_path, &component_name),
                 span: function_node.span,
             });
-            self.component_stack.push(component_name);
+            self.component_stack.push(next_component_node_id);
             walk::walk_function(self, function_node, flags);
             self.component_stack.pop();
         } else {
@@ -259,6 +263,7 @@ impl<'a> Visit<'a> for AstCollector {
     }
 
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        let next_component_node_id = self.components.len() + 1;
         let Some(binding_identifier) = declarator.id.get_binding_identifier() else {
             walk::walk_variable_declarator(self, declarator);
             return;
@@ -279,10 +284,10 @@ impl<'a> Visit<'a> for AstCollector {
             {
                 self.components.push(ComponentDef {
                     name: component_name.clone(),
-                    key: get_component_key(&self.file_path, &component_name),
+                    node_id: next_component_node_id,
                     span: binding_identifier.span,
                 });
-                self.component_stack.push(component_name);
+                self.component_stack.push(next_component_node_id);
                 self.function_owner_stack.push(FunctionOwnerFrame {
                     name: identifier_name.to_string(),
                     kind: FunctionOwnerKind::Component,
@@ -310,13 +315,17 @@ impl<'a> Visit<'a> for AstCollector {
     }
 
     fn visit_call_expression(&mut self, call_expression: &CallExpression<'a>) {
-        if let Some(context_symbol) = extract_context_symbol_from_consumer_call(call_expression) {
+        if let Some(context_symbol) = extract_context_symbol_from_consumer_call(call_expression)
+            && let Some(current_component_node_id) = self.component_stack.last()
+        {
+            let current_component_name = self.components[*current_component_node_id].name.clone();
+
             self.consumers.push(ConsumerUse {
                 context_ref: ContextRef {
                     symbol: context_symbol,
                     resolved_context_id: None,
                 },
-                containing_component_name: self.component_stack.last().cloned(),
+                containing_component_name: current_component_name,
                 containing_function_name: self.current_function_owner_name(),
                 containing_function_kind: self.current_function_owner_kind(),
                 span: call_expression.span,
@@ -326,32 +335,60 @@ impl<'a> Visit<'a> for AstCollector {
         walk::walk_call_expression(self, call_expression);
     }
 
+    fn visit_jsx_opening_element(&mut self, jsx_element: &JSXOpeningElement<'a>) {
+        if let Some(_) = extract_jsx_component_name(&jsx_element.name) {
+            self.jsx_symbol_stack.push(jsx_element.name.to_string());
+        }
+
+        walk::walk_jsx_opening_element(self, jsx_element);
+    }
+
+    fn visit_jsx_closing_element(&mut self, jsx_element: &JSXClosingElement<'a>) {
+        if let Some(current_jsx_symbol) = self.jsx_symbol_stack.last()
+            && current_jsx_symbol.to_string() == jsx_element.name.to_string()
+        {
+            self.jsx_symbol_stack.pop();
+        }
+
+        walk::walk_jsx_closing_element(self, jsx_element);
+    }
+
     fn visit_jsx_element(&mut self, jsx_element: &JSXElement<'a>) {
         let opening_element = &jsx_element.opening_element;
 
         if let Some(provider_symbol) = extract_provider_symbol(opening_element.as_ref()) {
-            self.providers.push(ProviderUse {
-                context_ref: ContextRef {
-                    symbol: provider_symbol,
-                    resolved_context_id: None,
-                },
-                containing_component_name: self.component_stack.last().cloned(),
-                containing_function_name: self.current_function_owner_name(),
-                containing_function_kind: self.current_function_owner_kind(),
-                span: opening_element.span,
-            });
+            if let Some(current_component_node_id) = self.component_stack.last() {
+                let current_component_name =
+                    self.components[*current_component_node_id].name.clone();
+
+                self.providers.push(ProviderUse {
+                    context_ref: ContextRef {
+                        symbol: provider_symbol,
+                        resolved_context_id: None,
+                    },
+                    containing_component_name: current_component_name,
+                    containing_function_name: self.current_function_owner_name(),
+                    containing_function_kind: self.current_function_owner_kind(),
+                    span: opening_element.span,
+                });
+            }
         }
 
-        if let Some(current_component_name) = self.component_stack.last()
-            && let Some(child_component_name) = extract_jsx_component_name(&opening_element.name)
-            && child_component_name != *current_component_name
-        {
-            self.render_edges.push(RenderEdge {
-                parent_component_key: get_component_key(&self.file_path, current_component_name),
-                parent_component_name: current_component_name.clone(),
-                child_component_name,
-                span: opening_element.span,
-            });
+        // TODO these conditions are gnarly
+        if let Some(current_component_node_id) = self.component_stack.last() {
+            let current_component_name = self.components[*current_component_node_id].name.clone();
+
+            if let Some(child_component_name) = extract_jsx_component_name(&opening_element.name)
+                && child_component_name != *current_component_name
+                && let Some(parent_jsx_symbol) = self.jsx_symbol_stack.last()
+            {
+                self.unresolved_render_edges.push(UnresolvedRenderEdge {
+                    parent_node_id: *current_component_node_id,
+                    child_rendered_symbol: child_component_name,
+                    parent_jsx_symbol: parent_jsx_symbol.clone(),
+                    span: opening_element.span,
+                });
+            }
         }
 
         walk::walk_jsx_element(self, jsx_element);
@@ -542,37 +579,50 @@ mod tests {
         assert_eq!(file_info.providers[0].context_ref.symbol, "AuthContext");
         assert_eq!(
             file_info.providers[0].containing_component_name,
-            Some("App".to_string())
+            "App".to_string()
         );
 
         assert_eq!(file_info.consumers.len(), 1);
         assert_eq!(file_info.consumers[0].context_ref.symbol, "AuthContext");
         assert_eq!(
             file_info.consumers[0].containing_component_name,
-            Some("App".to_string())
+            "App".to_string()
         );
+
+        let app_node_id = file_info
+            .components
+            .iter()
+            .find(|component| component.name == "App")
+            .map(|component| component.node_id)
+            .expect("App component should be collected");
+        let profile_page_node_id = file_info
+            .components
+            .iter()
+            .find(|component| component.name == "ProfilePage")
+            .map(|component| component.node_id)
+            .expect("ProfilePage component should be collected");
 
         assert_eq!(file_info.render_edges.len(), 3);
         assert!(
             file_info
                 .render_edges
                 .iter()
-                .any(|edge| edge.parent_component_name == "App"
-                    && edge.child_component_name == "AuthContext.Provider")
+                .any(|edge| edge.parent_node_id == app_node_id
+                    && edge.child_rendered_symbol == "AuthContext.Provider")
         );
         assert!(
             file_info
                 .render_edges
                 .iter()
-                .any(|edge| edge.parent_component_name == "App"
-                    && edge.child_component_name == "ProfilePage")
+                .any(|edge| edge.parent_node_id == app_node_id
+                    && edge.child_rendered_symbol == "ProfilePage")
         );
         assert!(
             file_info
                 .render_edges
                 .iter()
-                .any(|edge| edge.parent_component_name == "ProfilePage"
-                    && edge.child_component_name == "Header")
+                .any(|edge| edge.parent_node_id == profile_page_node_id
+                    && edge.child_rendered_symbol == "Header")
         );
 
         assert_eq!(file_info.module_imports.len(), 3);
@@ -647,8 +697,12 @@ mod tests {
 
                 const AuthContext = createContext(null);
 
-                function useAuth() {
-                    return useContext(AuthContext);
+                function App() {
+                    function useAuth() {
+                        return useContext(AuthContext);
+                    }
+
+                    return <div>{useAuth()}</div>;
                 }
             "#
             .to_string(),
@@ -665,7 +719,7 @@ mod tests {
             file_info.consumers[0].containing_function_kind,
             Some(FunctionOwnerKind::Hook)
         );
-        assert_eq!(file_info.consumers[0].containing_component_name, None);
+        assert_eq!(file_info.consumers[0].containing_component_name, "App");
     }
 
     #[test]

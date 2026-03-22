@@ -50,8 +50,9 @@ pub struct Component {
 }
 
 impl Component {
-    pub fn new(file_path: &str, component_name: &str) -> Self {
+    pub fn new(file_path: &str, component_name: &str, node_id: ComponentNodeId) -> Self {
         Self {
+            node_id,
             key: get_component_key(file_path, component_name),
             file_path: file_path.to_string(),
             name: component_name.to_string(),
@@ -108,7 +109,7 @@ pub struct FileInfo {
     pub module_exports: Vec<ExportSymbol>,
     pub providers: Vec<ProviderUse>,
     pub consumers: Vec<ConsumerUse>,
-    pub render_edges: Vec<RenderEdge>,
+    pub render_edges: Vec<UnresolvedRenderEdge>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -151,11 +152,13 @@ pub struct ContextDef {
     pub span: Span,
 }
 
+pub type ComponentNodeId = usize;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ComponentDef {
     // TODO this needs an int id - we do want to store
+    pub node_id: ComponentNodeId,
     pub name: String,
-    pub key: ComponentKey,
     pub span: Span,
 }
 
@@ -176,7 +179,7 @@ pub enum FunctionOwnerKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderUse {
     pub context_ref: ContextRef,
-    pub containing_component_name: Option<String>,
+    pub containing_component_name: String,
     pub containing_function_name: Option<String>,
     pub containing_function_kind: Option<FunctionOwnerKind>,
     pub span: Span,
@@ -185,7 +188,7 @@ pub struct ProviderUse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConsumerUse {
     pub context_ref: ContextRef,
-    pub containing_component_name: Option<String>,
+    pub containing_component_name: String,
     pub containing_function_name: Option<String>,
     pub containing_function_kind: Option<FunctionOwnerKind>,
     pub span: Span,
@@ -195,11 +198,11 @@ pub struct ConsumerUse {
 pub type ComponentKey = (FilePath, ComponentName);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RenderEdge {
+pub struct UnresolvedRenderEdge {
     pub parent_node_id: usize,
-    /// We only know the child component name on first pass because we have to resolve imports to
-    /// get the node id
+    /// We only know the child render symbol on first pass
     pub child_rendered_symbol: String,
+    pub parent_jsx_symbol: String,
     pub span: Span,
 }
 
