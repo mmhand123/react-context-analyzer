@@ -22,9 +22,13 @@ impl ProjectInfo {
     }
 }
 
+pub type ComponentName = String;
+pub type FilePath = String;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProjectGraph {
     pub components: Vec<Component>,
+    pub components_by_key: HashMap<ComponentKey, Component>,
     /// When we resolve the edge, we'll store the resolved child component as the key and then
     /// the full edge as the value. This lets us walk the graph in reverse order.
     pub resolved_render_edges: HashMap<ComponentKey, ResolvedRenderEdge>,
@@ -32,13 +36,14 @@ pub struct ProjectGraph {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedRenderEdge {
-    pub parent_component: Component,
-    pub child_component: Component,
+    pub parent_component_id: usize,
+    pub child_component_id: usize,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct Component {
+    pub node_id: usize,
     pub key: ComponentKey,
     pub file_path: String,
     pub name: String,
@@ -148,6 +153,7 @@ pub struct ContextDef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ComponentDef {
+    // TODO this needs an int id - we do want to store
     pub name: String,
     pub key: ComponentKey,
     pub span: Span,
@@ -186,19 +192,26 @@ pub struct ConsumerUse {
 }
 
 /// A unique identifier for a component - component name + file path
-pub type ComponentKey = String;
+pub type ComponentKey = (FilePath, ComponentName);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RenderEdge {
-    /// Because we are always in the parent file when rendering, we can resolve the parent key
-    pub parent_component_key: ComponentKey,
-    pub parent_component_name: String,
+    pub parent_node_id: usize,
     /// We only know the child component name on first pass because we have to resolve imports to
-    /// get the full key
-    pub child_component_name: String,
+    /// get the node id
+    pub child_rendered_symbol: String,
     pub span: Span,
 }
 
 pub fn get_component_key(file_path: &str, component_name: &str) -> ComponentKey {
-    format!("{file_path}:{component_name}")
+    (file_path.to_string(), component_name.to_string())
 }
+
+// TODO - We need to keep track of the JSX render tree in each file as well, so that we can resolve
+// that to figure out the provider stuff. We're basically going to need to resolve the whole render
+// tree
+// It should probably look like, for each component that renders other components - do a
+// Vec<Vec<TreeNode>> where the tree node id is an auto incrementing usize
+// hmm but we need to account for the nested relationship, will need to think about that
+// it could be another adjacency list or could just be a raw list of nodes that point to their
+// parent

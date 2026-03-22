@@ -24,13 +24,15 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
     let components: HashMap<ComponentKey, Component> = files
         .par_iter()
         .flat_map_iter(|file_info| {
-            file_info.components.iter().map(|component_def| {
+            let components_hash = file_info.components.iter().map(|component_def| {
                 let normalized_file_path = normalize_file_path_string(&file_info.file_path);
 
                 let component = Component::new(&normalized_file_path, &component_def.name);
 
                 (component.key.clone(), component)
-            })
+            });
+
+            components_hash
         })
         .collect();
 
