@@ -48,6 +48,14 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
         })
         .collect();
 
+    let components: Vec<&Component> = components_map.values().collect();
+
+    // Initialize the resolved render edges such that each component has an empty list of
+    // children
+    components.iter().for_each(|_| {
+        graph.resolved_render_edges.push(Vec::new());
+    });
+
     println!("all components: {:?}\n\n\n\n\n", components_map);
 
     // We'd like to do this in parallel but we're going to have to work around sharing the hashmap
@@ -71,11 +79,13 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
                     &current_file_path,
                     &components_map,
                 ) {
-                    let _ = graph.resolved_render_edges.push(ResolvedRenderEdge {
-                        parent_component_id: parent_component.node_id,
-                        child_component_id: child_component.node_id,
-                        span: edge.span,
-                    });
+                    let _ = graph.resolved_render_edges[parent_component.node_id].push(
+                        ResolvedRenderEdge {
+                            parent_component_id: parent_component.node_id,
+                            child_component_id: child_component.node_id,
+                            span: edge.span,
+                        },
+                    );
                 }
             }
         }

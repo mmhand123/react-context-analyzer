@@ -13,14 +13,17 @@ fn linker_resolves_named_import_render_edge() {
 
     println!("{:?}", project_info.graph.resolved_render_edges);
 
-    assert!(project_info.graph.resolved_render_edges.iter().any(|edge| {
-        println!("{:?}", edge);
+    let app_children = project_info.graph.resolved_render_edges[0].clone();
 
-        let parent_component = project_info.graph.components[edge.parent_component_id].clone();
-        let child_component = project_info.graph.components[edge.child_component_id].clone();
+    assert_eq!(app_children.len(), 1);
+    assert_eq!(app_children[0].parent_component_id, 0);
+    assert_eq!(app_children[0].child_component_id, 1);
 
-        parent_component.name == "App" && child_component.name == "ProfilePage"
-    }));
+    let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
+    let parent_component =
+        project_info.graph.components[app_children[0].parent_component_id].clone();
+    assert_eq!(parent_component.name, "App");
+    assert_eq!(child_component.name, "ProfilePage");
 }
 
 #[test]
@@ -31,12 +34,16 @@ fn linker_resolves_member_expression_edge() {
 
     let project_info = collect_project_info(&source_files);
 
-    assert!(project_info.graph.resolved_render_edges.iter().any(|edge| {
-        let parent_component = project_info.graph.components[edge.parent_component_id].clone();
-        let child_component = project_info.graph.components[edge.child_component_id].clone();
+    let app_children = project_info.graph.resolved_render_edges[0].clone();
+    assert_eq!(app_children.len(), 1);
+    assert_eq!(app_children[0].parent_component_id, 0);
+    assert_eq!(app_children[0].child_component_id, 1);
 
-        parent_component.name == "App" && child_component.name == "Button"
-    }));
+    let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
+    let parent_component =
+        project_info.graph.components[app_children[0].parent_component_id].clone();
+    assert_eq!(parent_component.name, "App");
+    assert_eq!(child_component.name, "Button");
 }
 
 #[test]
@@ -47,12 +54,16 @@ fn linker_resolves_named_import_via_export_alias() {
 
     let project_info = collect_project_info(&source_files);
 
-    assert!(project_info.graph.resolved_render_edges.iter().any(|edge| {
-        let parent_component = project_info.graph.components[edge.parent_component_id].clone();
-        let child_component = project_info.graph.components[edge.child_component_id].clone();
+    let app_children = project_info.graph.resolved_render_edges[0].clone();
+    assert_eq!(app_children.len(), 1);
+    assert_eq!(app_children[0].parent_component_id, 0);
+    assert_eq!(app_children[0].child_component_id, 1);
 
-        parent_component.name == "App" && child_component.name == "InternalProfilePage"
-    }));
+    let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
+    let parent_component =
+        project_info.graph.components[app_children[0].parent_component_id].clone();
+    assert_eq!(parent_component.name, "App");
+    assert_eq!(child_component.name, "InternalProfilePage");
 }
 
 #[test]
@@ -63,12 +74,16 @@ fn linker_resolves_default_export() {
 
     let project_info = collect_project_info(&source_files);
 
-    assert!(project_info.graph.resolved_render_edges.iter().any(|edge| {
-        let parent_component = project_info.graph.components[edge.parent_component_id].clone();
-        let child_component = project_info.graph.components[edge.child_component_id].clone();
+    let app_children = project_info.graph.resolved_render_edges[0].clone();
+    assert_eq!(app_children.len(), 1);
+    assert_eq!(app_children[0].parent_component_id, 0);
+    assert_eq!(app_children[0].child_component_id, 1);
 
-        parent_component.name == "App" && child_component.name == "ProfilePage"
-    }));
+    let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
+    let parent_component =
+        project_info.graph.components[app_children[0].parent_component_id].clone();
+    assert_eq!(parent_component.name, "App");
+    assert_eq!(child_component.name, "ProfilePage");
 }
 
 fn fixture_input_path(fixture_name: &str) -> PathBuf {

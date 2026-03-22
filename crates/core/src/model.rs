@@ -31,7 +31,7 @@ pub struct ProjectGraph {
     pub components_by_key: HashMap<ComponentKey, Component>,
     /// When we resolve the edge, we'll store the resolved child component as the key and then
     /// the full edge as the value. This lets us walk the graph in reverse order.
-    pub resolved_render_edges: Vec<ResolvedRenderEdge>,
+    pub resolved_render_edges: Vec<Vec<ResolvedRenderEdge>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
