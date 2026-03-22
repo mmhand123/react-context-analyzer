@@ -28,7 +28,7 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
             let components = file_info.components.iter().map(move |component_def| {
                 // When we built the file info we were tracking component node ids per file, but
                 // we need to have the "true" node id for the component across all files
-                let normalized_node_id = component_def.node_id + file_idx + 1;
+                let normalized_node_id = component_def.node_id + file_idx;
                 let normalized_file_path = normalize_file_path_string(&file_info.file_path);
 
                 let component = Component::new(
