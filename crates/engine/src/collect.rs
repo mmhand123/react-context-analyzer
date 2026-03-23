@@ -12,10 +12,10 @@ use context_analyzer_core::model::{
 use context_analyzer_frontend::SourceFileInput;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, CallExpression, ExportAllDeclaration, ExportDefaultDeclaration,
+    Argument, CallExpression, Declaration, ExportAllDeclaration, ExportDefaultDeclaration,
     ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression, Function, ImportDeclaration,
-    ImportDeclarationSpecifier, JSXAttributeItem, JSXClosingElement, JSXElement, JSXElementName,
-    JSXOpeningElement, ModuleExportName, VariableDeclarator,
+    ImportDeclarationSpecifier, JSXAttributeItem, JSXElement, JSXElementName, JSXOpeningElement,
+    ModuleExportName, VariableDeclarationKind, VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -170,6 +170,51 @@ impl<'a> Visit<'a> for AstCollector {
                 kind: ExportKind::Named,
                 is_type_only: specifier.export_kind.is_type(),
             });
+        }
+
+        if let Some(declaration) = &export_named_declaration.declaration {
+            match declaration {
+                Declaration::FunctionDeclaration(function_decl) => {
+                    if let Some(id) = &function_decl.id {
+                        let name = id.name.as_str().to_string();
+                        self.module_exports.push(ExportSymbol {
+                            export_name: name.clone(),
+                            local_name: Some(name),
+                            source_module: source_module.clone(),
+                            kind: ExportKind::Named,
+                            is_type_only: false,
+                        });
+                    }
+                }
+                Declaration::ClassDeclaration(class_decl) => {
+                    if let Some(id) = &class_decl.id {
+                        let name = id.name.as_str().to_string();
+                        self.module_exports.push(ExportSymbol {
+                            export_name: name.clone(),
+                            local_name: Some(name),
+                            source_module: source_module.clone(),
+                            kind: ExportKind::Named,
+                            is_type_only: false,
+                        });
+                    }
+                }
+                Declaration::VariableDeclaration(variable_decl) => {
+                    let is_type_only = matches!(variable_decl.kind, VariableDeclarationKind::Using);
+                    for declarator in &variable_decl.declarations {
+                        if let Some(binding_id) = declarator.id.get_binding_identifier() {
+                            let name = binding_id.name.as_str().to_string();
+                            self.module_exports.push(ExportSymbol {
+                                export_name: name.clone(),
+                                local_name: Some(name),
+                                source_module: source_module.clone(),
+                                kind: ExportKind::Named,
+                                is_type_only,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
 
         walk::walk_export_named_declaration(self, export_named_declaration);
