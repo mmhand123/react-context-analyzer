@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use context_analyzer_core::model::{
-    Component, ComponentKey, ExportKind, FileInfo, ImportKind, ProjectGraph, ResolvedRenderEdge,
+    Component, ComponentKey, ExportKind, ExportSymbol, ExportSymbolKey, FileInfo, ImportKind,
+    ProjectGraph, ResolvedRenderEdge,
 };
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
 use rayon::prelude::*;
@@ -18,58 +19,83 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
 
     let mut graph = ProjectGraph::default();
 
-    // TODO - ok so what I can do here is go over all the exports like the LLM wanted to,
-    // but at the same time as we go over the components (and in parallel still) so that it's much
-    // faster. And here we'll gather all the exports related to a file and map them to components
-    let components_map: HashMap<ComponentKey, Component> = files
-        .par_iter()
-        .enumerate()
-        .flat_map_iter(|(file_idx, file_info)| {
-            let components = file_info.components.iter().map(move |component_def| {
-                // When we built the file info we were tracking component node ids per file, but
-                // we need to have the "true" node id for the component across all files
-                let normalized_node_id = component_def.node_id + file_idx;
-                let normalized_file_path = normalize_file_path_string(&file_info.file_path);
-
-                let component = Component::new(
-                    &normalized_file_path,
-                    &component_def.name,
-                    normalized_node_id,
-                    component_def.span,
-                );
-
-                (
-                    (normalized_file_path.clone(), component_def.name.clone()),
-                    component,
-                )
-            });
-
-            components
-        })
-        .collect();
-
-    let components: Vec<&Component> = components_map.values().collect();
-
-    // Initialize the resolved render edges such that each component has an empty list of
-    // children
-    components.iter().for_each(|_| {
-        graph.resolved_render_edges.push(Vec::new());
+    // TODO: We might want to move this to where we're loading the files, we shouldn't have to care about
+    // this in here
+    let mut files_in_stable_order: Vec<&FileInfo> = files.iter().collect();
+    files_in_stable_order.sort_by(|left, right| {
+        normalize_file_path_string(&left.file_path)
+            .cmp(&normalize_file_path_string(&right.file_path))
     });
 
-    println!("all components: {:?}\n\n\n\n\n", components_map);
+    // We need to ensure node_id is correct across all files, but want to do the actual work in
+    // parallel. Might be another way to do this I don't love it
+    let mut next_component_node_id = 0;
+    let mut file_component_offsets = Vec::with_capacity(files_in_stable_order.len());
+    for file_info in &files_in_stable_order {
+        file_component_offsets.push(next_component_node_id);
+        next_component_node_id += file_info.components.len();
+    }
+
+    let (components_map, exports_map): (
+        HashMap<ComponentKey, Component>,
+        HashMap<ExportSymbolKey, ExportSymbol>,
+    ) = files_in_stable_order
+        .par_iter()
+        .zip(file_component_offsets.par_iter())
+        .fold(
+            || (HashMap::new(), HashMap::new()),
+            |(mut components, mut exports), (file_info, component_offset)| {
+                let normalized_file_path = normalize_file_path_string(&file_info.file_path);
+
+                for (component_idx, component_def) in file_info.components.iter().enumerate() {
+                    let component = Component::new(
+                        &normalized_file_path,
+                        &component_def.name,
+                        component_offset + component_idx,
+                        component_def.span,
+                    );
+
+                    components.insert(
+                        (normalized_file_path.clone(), component_def.name.clone()),
+                        component,
+                    );
+                }
+
+                for export_symbol in &file_info.module_exports {
+                    let export_name = match export_symbol.kind {
+                        ExportKind::Named => export_symbol.export_name.clone(),
+                        _ => export_symbol.local_name.clone().unwrap_or_default(),
+                    };
+
+                    exports.insert(
+                        (normalized_file_path.clone(), export_name),
+                        export_symbol.clone(),
+                    );
+                }
+
+                (components, exports)
+            },
+        )
+        .reduce(
+            || (HashMap::new(), HashMap::new()),
+            |(mut c1, mut e1), (c2, e2)| {
+                c1.extend(c2);
+                e1.extend(e2);
+                (c1, e1)
+            },
+        );
+
+    graph.resolved_render_edges = vec![Vec::new(); next_component_node_id];
 
     // We'd like to do this in parallel but we're going to have to work around sharing the hashmap
-    for file_info in files {
+    for file_info in &files_in_stable_order {
         for edge in &file_info.unresolved_render_edges {
             let current_file_path = normalize_file_path_string(&file_info.file_path);
-            println!("current_file_path: {:?}", current_file_path);
             // TODO - figure out all this clone nonsense
             let parent_component = components_map.get(&(
                 current_file_path.clone(),
                 edge.parent_component_name.clone(),
             ));
-
-            println!("parent component: {:?}", parent_component);
 
             if let Some(parent_component) = parent_component {
                 if let Some(child_component) = resolve_child_component(
@@ -78,6 +104,7 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
                     &resolver,
                     &current_file_path,
                     &components_map,
+                    &exports_map,
                 ) {
                     let _ = graph.resolved_render_edges[parent_component.node_id].push(
                         ResolvedRenderEdge {
@@ -91,10 +118,11 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
         }
     }
 
-    graph.components = components_map
-        .iter()
-        .map(|(_, component)| component.clone())
-        .collect();
+    graph.components = vec![Component::default(); next_component_node_id];
+    for component in components_map.values() {
+        graph.components[component.node_id] = component.clone();
+    }
+    graph.components_by_key = components_map.clone();
 
     graph
 }
@@ -105,9 +133,18 @@ fn resolve_child_component(
     resolver: &Resolver,
     current_file_path: &String,
     components_map: &HashMap<ComponentKey, Component>,
+    exports_map: &HashMap<ExportSymbolKey, ExportSymbol>,
 ) -> Option<Component> {
     let import_symbol = file_info.module_imports.iter().find(|import_symbol| {
-        import_symbol.local_name == child_symbol && !import_symbol.is_type_only
+        if import_symbol.is_type_only {
+            return false;
+        }
+
+        match import_symbol.kind {
+            ImportKind::Named => import_symbol.local_name == child_symbol,
+            ImportKind::Namespace => child_symbol.starts_with(&import_symbol.local_name),
+            ImportKind::Default => import_symbol.local_name == child_symbol,
+        }
     })?;
 
     let resolve_result = resolver
@@ -116,16 +153,14 @@ fn resolve_child_component(
 
     let resolved_file_path = normalize_file_path_from_path(resolve_result.path());
 
-    // Yeah ok so file_info here is the wrong file, it's the parent file
-    // Also import symbol is wrong
-    let export_alias = export_alias(&import_symbol.source_module, file_info);
+    let export_symbol =
+        exports_map.get(&(resolved_file_path.clone(), import_symbol.local_name.clone()));
 
-    println!("resolved_file_path: {:?}", resolved_file_path);
-    println!("export_alias: {:?}", export_alias);
+    if let Some(export_symbol) = export_symbol {
+        let export_local_component_name = export_symbol.local_name.clone().unwrap_or_default();
 
-    if let Some(export_alias) = export_alias {
         return components_map
-            .get(&(resolved_file_path, export_alias))
+            .get(&(resolved_file_path, export_local_component_name))
             .cloned();
     }
 
@@ -141,39 +176,17 @@ fn resolve_child_component(
                 .get(&(resolved_file_path, imported_name.to_string()))
                 .cloned()
         }
-        ImportKind::Namespace => None,
+        ImportKind::Namespace => {
+            let local_name = child_symbol
+                .strip_prefix(&import_symbol.local_name)
+                .and_then(|rest| rest.strip_prefix('.').or(Some(rest)))
+                .unwrap_or(child_symbol);
+
+            components_map
+                .get(&(resolved_file_path, local_name.to_string()))
+                .cloned()
+        }
     }
-}
-
-fn export_alias(component_name: &String, file_info: &FileInfo) -> Option<String> {
-    println!("module_exports: {:?}", file_info.module_exports);
-
-    file_info
-        .module_exports
-        .iter()
-        .find(|export_symbol| {
-            println!("export_symbol: {:?}", export_symbol);
-            if export_symbol.is_type_only {
-                return false;
-            }
-
-            if export_symbol.source_module.is_some() {
-                return false;
-            }
-
-            if export_symbol.kind == ExportKind::ReExportAll {
-                return false;
-            }
-
-            if let Some(local_name) = &export_symbol.local_name {
-                println!("local_name: {:?}", local_name);
-                println!("component_name: {:?}", component_name);
-                return local_name == component_name;
-            } else {
-                return false;
-            }
-        })
-        .and_then(|export_symbol| export_symbol.local_name.clone())
 }
 
 fn resolve_options() -> ResolveOptions {

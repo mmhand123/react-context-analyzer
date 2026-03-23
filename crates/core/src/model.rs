@@ -151,6 +151,8 @@ pub struct ExportSymbol {
     pub is_type_only: bool,
 }
 
+pub type ExportSymbolKey = (String, String);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ContextDef {
     pub name: String,
