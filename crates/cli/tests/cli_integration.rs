@@ -10,7 +10,7 @@ fn cli_accepts_project_path_as_positional_argument() {
         .join("basic_working_context")
         .join("input");
 
-    let command_output = Command::cargo_bin("cli")
+    let command_output = Command::cargo_bin("context-analyzer-cli")
         .expect("cli binary should build")
         .arg(&fixture_path)
         .assert()
@@ -37,7 +37,7 @@ fn cli_pretty_flag_outputs_indented_json() {
         .join("basic_working_context")
         .join("input");
 
-    let command_output = Command::cargo_bin("cli")
+    let command_output = Command::cargo_bin("context-analyzer-cli")
         .expect("cli binary should build")
         .arg(&fixture_path)
         .arg("--pretty")

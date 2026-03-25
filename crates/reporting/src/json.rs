@@ -83,8 +83,8 @@ fn normalize_file_info(file_info: &mut FileInfo) {
                 .cmp(&right_edge.parent_component_name)
                 .then_with(|| {
                     left_edge
-                        .child_component_name
-                        .cmp(&right_edge.child_component_name)
+                        .child_rendered_symbol
+                        .cmp(&right_edge.child_rendered_symbol)
                 })
         });
 }
@@ -93,11 +93,11 @@ fn normalize_file_info(file_info: &mut FileInfo) {
 mod tests {
     use context_analyzer_core::model::{
         ComponentDef, ConsumerUse, ContextDef, ContextRef, ExportKind, ExportSymbol, FileInfo,
-        FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse, ResolvedRenderEdge,
-        Span, UnresolvedRenderEdge,
+        FunctionOwnerKind, ImportKind, ImportSymbol, ProjectInfo, ProviderUse, Span,
+        UnresolvedRenderEdge,
     };
 
-    use super::{to_json_compact, to_json_pretty};
+    use super::to_json_pretty;
 
     #[test]
     fn json_does_not_include_diagnostics_field() {
@@ -145,7 +145,7 @@ mod tests {
                     },
                 ],
                 components: vec![ComponentDef {
-                    key: "src/App.tsx:App".to_string(),
+                    node_id: 0,
                     name: "App".to_string(),
                     span: Span::new(31, 40),
                 }],
@@ -186,7 +186,7 @@ mod tests {
                         symbol: "ThemeContext".to_string(),
                         resolved_context_id: None,
                     },
-                    containing_component_name: Some("App".to_string()),
+                    containing_component_name: "App".to_string(),
                     containing_function_name: Some("App".to_string()),
                     containing_function_kind: Some(FunctionOwnerKind::Component),
                     span: Span::new(41, 50),
@@ -196,21 +196,21 @@ mod tests {
                         symbol: "AuthContext".to_string(),
                         resolved_context_id: None,
                     },
-                    containing_component_name: Some("App".to_string()),
+                    containing_component_name: "App".to_string(),
                     containing_function_name: Some("App".to_string()),
                     containing_function_kind: Some(FunctionOwnerKind::Component),
                     span: Span::new(51, 60),
                 }],
                 unresolved_render_edges: vec![UnresolvedRenderEdge {
                     parent_component_name: "App".to_string(),
-                    child_component_name: "ProfilePage".to_string(),
+                    child_rendered_symbol: "ProfilePage".to_string(),
                     span: Span::new(61, 70),
-                    parent_component_key: "src/App.tsx:App".to_string(),
+                    parent_jsx_symbol: "App".to_string(),
                 }],
             });
         }
 
-        let mut project_info = ProjectInfo::from_files(files);
+        let project_info = ProjectInfo::from_files(files);
         // TODO: Probably fix this idk if it's actually useful
         // project_info.graph.components = vec![
         //     ComponentNode {

@@ -28,6 +28,7 @@ pub type FilePath = String;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProjectGraph {
     pub components: Vec<Component>,
+    #[serde(skip_serializing)]
     pub components_by_key: HashMap<ComponentKey, Component>,
     /// When we resolve the edge, we'll store the resolved child component as the key and then
     /// the full edge as the value. This lets us walk the graph in reverse order.
