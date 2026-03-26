@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use context_analyzer_engine::collect::collect_project_info;
 use context_analyzer_frontend::load_source_files;
@@ -84,6 +84,64 @@ fn linker_resolves_default_export() {
         project_info.graph.components[app_children[0].parent_component_id].clone();
     assert_eq!(parent_component.name, "App");
     assert_eq!(child_component.name, "ProfilePage");
+}
+
+#[test]
+fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
+    let fixture_input = fixture_input_path("link_resolves_nested_children");
+    let source_files =
+        load_source_files(&fixture_input).expect("fixture source files should load cleanly");
+
+    let project_info = collect_project_info(&source_files);
+
+    let resolved_pairs: BTreeSet<(String, String)> = project_info
+        .graph
+        .resolved_render_edges
+        .iter()
+        .flatten()
+        .map(|edge| {
+            let parent_name = project_info.graph.components[edge.parent_component_id]
+                .name
+                .clone();
+            let child_name = project_info.graph.components[edge.child_component_id]
+                .name
+                .clone();
+            (parent_name, child_name)
+        })
+        .collect();
+
+    let expected_pairs = BTreeSet::from([
+        ("App".to_string(), "PageShell".to_string()),
+        ("App".to_string(), "ProfilePage".to_string()),
+        ("PageShell".to_string(), "GlobalNav".to_string()),
+        ("ProfilePage".to_string(), "Avatar".to_string()),
+    ]);
+
+    assert_eq!(resolved_pairs, expected_pairs);
+
+    assert!(
+        !project_info
+            .graph
+            .resolved_render_edges
+            .iter()
+            .flatten()
+            .any(|edge| {
+                let child_name = &project_info.graph.components[edge.child_component_id].name;
+                child_name == "LocalBadge" || child_name == "ShellFrame"
+            })
+    );
+
+    let app_file = project_info
+        .files
+        .iter()
+        .find(|file| file.file_path.ends_with("/App.tsx") || file.file_path.ends_with("\\App.tsx"))
+        .expect("expected fixture to include App.tsx file info");
+
+    assert!(app_file.unresolved_render_edges.iter().any(|edge| {
+        edge.parent_component_name == "App"
+            && edge.child_rendered_symbol == "ProfilePage"
+            && edge.parent_jsx_symbol == "PageShell"
+    }));
 }
 
 fn fixture_input_path(fixture_name: &str) -> PathBuf {
