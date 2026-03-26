@@ -119,17 +119,15 @@ fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
 
     assert_eq!(resolved_pairs, expected_pairs);
 
-    assert!(
-        !project_info
-            .graph
-            .resolved_render_edges
-            .iter()
-            .flatten()
-            .any(|edge| {
-                let child_name = &project_info.graph.components[edge.child_component_id].name;
-                child_name == "LocalBadge" || child_name == "ShellFrame"
-            })
-    );
+    assert!(!project_info
+        .graph
+        .resolved_render_edges
+        .iter()
+        .flatten()
+        .any(|edge| {
+            let child_name = &project_info.graph.components[edge.child_component_id].name;
+            child_name == "LocalBadge" || child_name == "ShellFrame"
+        }));
 
     let app_file = project_info
         .files
@@ -142,6 +140,58 @@ fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
             && edge.child_rendered_symbol == "ProfilePage"
             && edge.parent_jsx_symbol == "PageShell"
     }));
+}
+
+#[test]
+fn linker_finds_multiple_distinct_parents_for_shared_child() {
+    let fixture_input = fixture_input_path("link_shared_child_multiple_distinct_parents");
+    let source_files =
+        load_source_files(&fixture_input).expect("fixture source files should load cleanly");
+
+    let project_info = collect_project_info(&source_files);
+
+    let resolved_pairs: BTreeSet<(String, String)> = project_info
+        .graph
+        .resolved_render_edges
+        .iter()
+        .flatten()
+        .map(|edge| {
+            let parent_name = project_info.graph.components[edge.parent_component_id]
+                .name
+                .clone();
+            let child_name = project_info.graph.components[edge.child_component_id]
+                .name
+                .clone();
+            (parent_name, child_name)
+        })
+        .collect();
+
+    let expected_pairs = BTreeSet::from([
+        ("App".to_string(), "LeftPane".to_string()),
+        ("App".to_string(), "RightPane".to_string()),
+        ("LeftPane".to_string(), "SharedChild".to_string()),
+        ("RightPane".to_string(), "SharedChild".to_string()),
+    ]);
+    assert_eq!(resolved_pairs, expected_pairs);
+
+    let shared_child_parents: BTreeSet<String> = resolved_pairs
+        .iter()
+        .filter(|(_, child)| child == "SharedChild")
+        .map(|(parent, _)| parent.clone())
+        .collect();
+    assert_eq!(
+        shared_child_parents,
+        BTreeSet::from(["LeftPane".to_string(), "RightPane".to_string()])
+    );
+
+    let shared_child_edge_count = project_info
+        .graph
+        .resolved_render_edges
+        .iter()
+        .flatten()
+        .filter(|edge| project_info.graph.components[edge.child_component_id].name == "SharedChild")
+        .count();
+    assert_eq!(shared_child_edge_count, 2);
 }
 
 fn fixture_input_path(fixture_name: &str) -> PathBuf {
