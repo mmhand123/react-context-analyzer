@@ -52,7 +52,7 @@ pub fn collect_file_info(source_file: &SourceFileInput) -> FileInfo {
     collector.visit_program(&parser_output.program);
 
     FileInfo {
-        file_path: file_path,
+        file_path,
         contexts: collector.contexts,
         components: collector.components,
         module_imports: collector.module_imports,
@@ -381,22 +381,21 @@ impl<'a> Visit<'a> for AstCollector {
         let opening_element = &jsx_element.opening_element;
         let current_jsx_symbol = extract_jsx_component_name(&opening_element.name);
 
-        if let Some(provider_symbol) = extract_provider_symbol(opening_element.as_ref()) {
-            if let Some(current_component_node_id) = self.component_stack.last() {
-                let current_component_name =
-                    self.components[*current_component_node_id].name.clone();
+        if let Some(provider_symbol) = extract_provider_symbol(opening_element.as_ref())
+            && let Some(current_component_node_id) = self.component_stack.last()
+        {
+            let current_component_name = self.components[*current_component_node_id].name.clone();
 
-                self.providers.push(ProviderUse {
-                    context_ref: ContextRef {
-                        symbol: provider_symbol,
-                        resolved_context_id: None,
-                    },
-                    containing_component_name: current_component_name,
-                    containing_function_name: self.current_function_owner_name(),
-                    containing_function_kind: self.current_function_owner_kind(),
-                    span: opening_element.span,
-                });
-            }
+            self.providers.push(ProviderUse {
+                context_ref: ContextRef {
+                    symbol: provider_symbol,
+                    resolved_context_id: None,
+                },
+                containing_component_name: current_component_name,
+                containing_function_name: self.current_function_owner_name(),
+                containing_function_kind: self.current_function_owner_kind(),
+                span: opening_element.span,
+            });
         }
 
         // TODO these conditions are gnarly

@@ -74,7 +74,7 @@ fn is_hook_name(name: &str) -> bool {
         return false;
     }
 
-    return true;
+    true
 }
 
 pub(crate) fn extract_jsx_component_name(element_name: &JSXElementName<'_>) -> Option<String> {

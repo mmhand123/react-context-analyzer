@@ -14,7 +14,7 @@ use crate::paths::{normalize_file_path_from_path, normalize_file_path_string};
 /// files, and then resolving imports back to the actual file the rendered component comes from.
 /// We'll use this to be able to walk up the graph and ensure each component that uses a context
 /// has the appropriate Provider rendered above it
-pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
+pub fn build_project_graph(files: &[FileInfo]) -> ProjectGraph {
     let resolver = Resolver::new(resolve_options());
 
     let mut graph = ProjectGraph::default();
@@ -97,43 +97,41 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
                 edge.parent_component_name.clone(),
             ));
 
-            // HADOKUEN
-            // ... there must be a better way of structuring this
-            if let Some(parent_component) = parent_component {
-                if let Some(child_component) = resolve_child_component(
+            if let Some(parent_component) = parent_component
+                && let Some(child_component) = resolve_child_component(
                     file_info,
                     &edge.child_rendered_symbol,
                     &resolver,
                     &current_file_path,
                     &components_map,
                     &exports_map,
+                )
+            {
+                if edge.parent_jsx_symbol == edge.parent_component_name {
+                    graph.resolved_render_edges[parent_component.node_id].push(
+                        ResolvedRenderEdge {
+                            parent_component_id: parent_component.node_id,
+                            child_component_id: child_component.node_id,
+                            parent_jsx_component_id: parent_component.node_id,
+                            span: edge.span,
+                        },
+                    );
+                } else if let Some(parent_jsx_component) = resolve_child_component(
+                    file_info,
+                    &edge.parent_jsx_symbol,
+                    &resolver,
+                    &current_file_path,
+                    &components_map,
+                    &exports_map,
                 ) {
-                    if edge.parent_jsx_symbol == edge.parent_component_name {
-                        let _ = graph.resolved_render_edges[parent_component.node_id].push(
-                            ResolvedRenderEdge {
-                                parent_component_id: parent_component.node_id,
-                                child_component_id: child_component.node_id,
-                                parent_jsx_component_id: parent_component.node_id,
-                                span: edge.span,
-                            },
-                        );
-                    } else if let Some(parent_jsx_component) = resolve_child_component(
-                        file_info,
-                        &edge.parent_jsx_symbol,
-                        &resolver,
-                        &current_file_path,
-                        &components_map,
-                        &exports_map,
-                    ) {
-                        let _ = graph.resolved_render_edges[parent_component.node_id].push(
-                            ResolvedRenderEdge {
-                                parent_component_id: parent_component.node_id,
-                                child_component_id: child_component.node_id,
-                                parent_jsx_component_id: parent_jsx_component.node_id,
-                                span: edge.span,
-                            },
-                        );
-                    }
+                    graph.resolved_render_edges[parent_component.node_id].push(
+                        ResolvedRenderEdge {
+                            parent_component_id: parent_component.node_id,
+                            child_component_id: child_component.node_id,
+                            parent_jsx_component_id: parent_jsx_component.node_id,
+                            span: edge.span,
+                        },
+                    );
                 }
             }
         }
