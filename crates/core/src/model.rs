@@ -37,8 +37,16 @@ pub struct ProjectGraph {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedRenderEdge {
+    /// This is the id of the component that the render edge is coming from
+    /// e.g. in `<App><ProfilePage /></App>`, the parent component id is the id of `<App />`
     pub parent_component_id: usize,
+    /// This is the id of the component that the render edge is going to
+    /// e.g. in `<App><ProfilePage /></App>`, the child component id is the id of `<ProfilePage />`
     pub child_component_id: usize,
+    /// This is the id of the component that the render edge is under in the JSX tree
+    /// e.g., in `<App><Main><ProfilePage /></Main></App>`, the parent jsx component id for ProfilePage is the id of `<Main />`
+    pub parent_jsx_component_id: usize,
+    /// The span of the render edge from the oxc AST
     pub span: Span,
 }
 

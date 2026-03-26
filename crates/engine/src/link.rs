@@ -97,6 +97,8 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
                 edge.parent_component_name.clone(),
             ));
 
+            // HADOKUEN
+            // ... there must be a better way of structuring this
             if let Some(parent_component) = parent_component {
                 if let Some(child_component) = resolve_child_component(
                     file_info,
@@ -106,13 +108,32 @@ pub fn build_project_graph(files: &Vec<FileInfo>) -> ProjectGraph {
                     &components_map,
                     &exports_map,
                 ) {
-                    let _ = graph.resolved_render_edges[parent_component.node_id].push(
-                        ResolvedRenderEdge {
-                            parent_component_id: parent_component.node_id,
-                            child_component_id: child_component.node_id,
-                            span: edge.span,
-                        },
-                    );
+                    if edge.parent_jsx_symbol == edge.parent_component_name {
+                        let _ = graph.resolved_render_edges[parent_component.node_id].push(
+                            ResolvedRenderEdge {
+                                parent_component_id: parent_component.node_id,
+                                child_component_id: child_component.node_id,
+                                parent_jsx_component_id: parent_component.node_id,
+                                span: edge.span,
+                            },
+                        );
+                    } else if let Some(parent_jsx_component) = resolve_child_component(
+                        file_info,
+                        &edge.parent_jsx_symbol,
+                        &resolver,
+                        &current_file_path,
+                        &components_map,
+                        &exports_map,
+                    ) {
+                        let _ = graph.resolved_render_edges[parent_component.node_id].push(
+                            ResolvedRenderEdge {
+                                parent_component_id: parent_component.node_id,
+                                child_component_id: child_component.node_id,
+                                parent_jsx_component_id: parent_jsx_component.node_id,
+                                span: edge.span,
+                            },
+                        );
+                    }
                 }
             }
         }

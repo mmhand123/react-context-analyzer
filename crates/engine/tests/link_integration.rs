@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
+use context_analyzer_core::model::{ProjectInfo, ResolvedRenderEdge};
 use context_analyzer_engine::collect::collect_project_info;
 use context_analyzer_frontend::load_source_files;
 
@@ -18,11 +19,15 @@ fn linker_resolves_named_import_render_edge() {
     assert_eq!(app_children.len(), 1);
     assert_eq!(app_children[0].parent_component_id, 0);
     assert_eq!(app_children[0].child_component_id, 1);
+    assert_eq!(app_children[0].parent_jsx_component_id, 0);
 
     let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
     let parent_component =
         project_info.graph.components[app_children[0].parent_component_id].clone();
+    let parent_jsx_component =
+        project_info.graph.components[app_children[0].parent_jsx_component_id].clone();
     assert_eq!(parent_component.name, "App");
+    assert_eq!(parent_jsx_component.name, "App");
     assert_eq!(child_component.name, "ProfilePage");
 }
 
@@ -38,11 +43,15 @@ fn linker_resolves_member_expression_edge() {
     assert_eq!(app_children.len(), 1);
     assert_eq!(app_children[0].parent_component_id, 0);
     assert_eq!(app_children[0].child_component_id, 1);
+    assert_eq!(app_children[0].parent_jsx_component_id, 0);
 
     let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
     let parent_component =
         project_info.graph.components[app_children[0].parent_component_id].clone();
+    let parent_jsx_component =
+        project_info.graph.components[app_children[0].parent_jsx_component_id].clone();
     assert_eq!(parent_component.name, "App");
+    assert_eq!(parent_jsx_component.name, "App");
     assert_eq!(child_component.name, "Button");
 }
 
@@ -58,11 +67,15 @@ fn linker_resolves_named_import_via_export_alias() {
     assert_eq!(app_children.len(), 1);
     assert_eq!(app_children[0].parent_component_id, 0);
     assert_eq!(app_children[0].child_component_id, 1);
+    assert_eq!(app_children[0].parent_jsx_component_id, 0);
 
     let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
     let parent_component =
         project_info.graph.components[app_children[0].parent_component_id].clone();
+    let parent_jsx_component =
+        project_info.graph.components[app_children[0].parent_jsx_component_id].clone();
     assert_eq!(parent_component.name, "App");
+    assert_eq!(parent_jsx_component.name, "App");
     assert_eq!(child_component.name, "InternalProfilePage");
 }
 
@@ -78,11 +91,15 @@ fn linker_resolves_default_export() {
     assert_eq!(app_children.len(), 1);
     assert_eq!(app_children[0].parent_component_id, 0);
     assert_eq!(app_children[0].child_component_id, 1);
+    assert_eq!(app_children[0].parent_jsx_component_id, 0);
 
     let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
     let parent_component =
         project_info.graph.components[app_children[0].parent_component_id].clone();
+    let parent_jsx_component =
+        project_info.graph.components[app_children[0].parent_jsx_component_id].clone();
     assert_eq!(parent_component.name, "App");
+    assert_eq!(parent_jsx_component.name, "App");
     assert_eq!(child_component.name, "ProfilePage");
 }
 
@@ -119,15 +136,49 @@ fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
 
     assert_eq!(resolved_pairs, expected_pairs);
 
-    assert!(!project_info
+    let resolved_triples: BTreeSet<(String, String, String)> = project_info
         .graph
         .resolved_render_edges
         .iter()
         .flatten()
-        .any(|edge| {
-            let child_name = &project_info.graph.components[edge.child_component_id].name;
-            child_name == "LocalBadge" || child_name == "ShellFrame"
-        }));
+        .map(|edge| resolved_edge_name_triple(&project_info, edge))
+        .collect();
+
+    let expected_triples = BTreeSet::from([
+        (
+            "App".to_string(),
+            "App".to_string(),
+            "PageShell".to_string(),
+        ),
+        (
+            "App".to_string(),
+            "PageShell".to_string(),
+            "ProfilePage".to_string(),
+        ),
+        (
+            "PageShell".to_string(),
+            "PageShell".to_string(),
+            "GlobalNav".to_string(),
+        ),
+        (
+            "ProfilePage".to_string(),
+            "ProfilePage".to_string(),
+            "Avatar".to_string(),
+        ),
+    ]);
+    assert_eq!(resolved_triples, expected_triples);
+
+    assert!(
+        !project_info
+            .graph
+            .resolved_render_edges
+            .iter()
+            .flatten()
+            .any(|edge| {
+                let child_name = &project_info.graph.components[edge.child_component_id].name;
+                child_name == "LocalBadge" || child_name == "ShellFrame"
+            })
+    );
 
     let app_file = project_info
         .files
@@ -174,6 +225,34 @@ fn linker_finds_multiple_distinct_parents_for_shared_child() {
     ]);
     assert_eq!(resolved_pairs, expected_pairs);
 
+    let resolved_triples: BTreeSet<(String, String, String)> = project_info
+        .graph
+        .resolved_render_edges
+        .iter()
+        .flatten()
+        .map(|edge| resolved_edge_name_triple(&project_info, edge))
+        .collect();
+
+    let expected_triples = BTreeSet::from([
+        ("App".to_string(), "App".to_string(), "LeftPane".to_string()),
+        (
+            "App".to_string(),
+            "App".to_string(),
+            "RightPane".to_string(),
+        ),
+        (
+            "LeftPane".to_string(),
+            "LeftPane".to_string(),
+            "SharedChild".to_string(),
+        ),
+        (
+            "RightPane".to_string(),
+            "RightPane".to_string(),
+            "SharedChild".to_string(),
+        ),
+    ]);
+    assert_eq!(resolved_triples, expected_triples);
+
     let shared_child_parents: BTreeSet<String> = resolved_pairs
         .iter()
         .filter(|(_, child)| child == "SharedChild")
@@ -202,4 +281,21 @@ fn fixture_input_path(fixture_name: &str) -> PathBuf {
         .join("fixtures")
         .join(fixture_name)
         .join("input")
+}
+
+fn resolved_edge_name_triple(
+    project_info: &ProjectInfo,
+    edge: &ResolvedRenderEdge,
+) -> (String, String, String) {
+    let parent_name = project_info.graph.components[edge.parent_component_id]
+        .name
+        .clone();
+    let parent_jsx_name = project_info.graph.components[edge.parent_jsx_component_id]
+        .name
+        .clone();
+    let child_name = project_info.graph.components[edge.child_component_id]
+        .name
+        .clone();
+
+    (parent_name, parent_jsx_name, child_name)
 }
