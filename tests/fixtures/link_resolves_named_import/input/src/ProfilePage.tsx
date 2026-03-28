@@ -1,5 +1,5 @@
 function ProfilePage() {
-    return <div />;
+  return <div />;
 }
 
 export { ProfilePage };

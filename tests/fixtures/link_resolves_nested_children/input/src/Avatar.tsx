@@ -1,3 +1,3 @@
 export function Avatar() {
-    return <img />;
+  return <img />;
 }

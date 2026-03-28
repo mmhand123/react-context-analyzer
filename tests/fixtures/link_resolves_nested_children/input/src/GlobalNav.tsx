@@ -1,3 +1,3 @@
 export function GlobalNav() {
-    return <nav />;
+  return <nav />;
 }

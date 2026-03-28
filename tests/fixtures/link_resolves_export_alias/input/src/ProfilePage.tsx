@@ -1,5 +1,5 @@
 function InternalProfilePage() {
-    return <div />;
+  return <div />;
 }
 
 export { InternalProfilePage as ProfilePage };
