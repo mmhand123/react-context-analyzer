@@ -155,6 +155,10 @@ fn resolve_child_component(
     components_map: &HashMap<ComponentKey, Component>,
     exports_map: &HashMap<ExportSymbolKey, ExportSymbol>,
 ) -> Option<Component> {
+    // TODO: I think if child_symbol is "children" we need to return a Component with a predefined
+    // node_id, something like -1 that we know is always children. Means we need to move away from
+    // usize for node_id thoough...
+    // Or we can resolve children separately somehow
     let import_symbol = file_info.module_imports.iter().find(|import_symbol| {
         if import_symbol.is_type_only {
             return false;

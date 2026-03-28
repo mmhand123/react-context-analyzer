@@ -297,6 +297,56 @@ fn linker_finds_multiple_distinct_parents_for_shared_child() {
     assert_eq!(shared_child_edge_count, 2);
 }
 
+#[test]
+fn linker_resolves_children_projection_parent_jsx() {
+    let fixture_input = fixture_input_path("link_resolves_children");
+    let source_files =
+        load_source_files(&fixture_input).expect("fixture source files should load cleanly");
+
+    let project_info = collect_project_info(&source_files);
+
+    println!("{:#?}", project_info.graph);
+
+    assert_eq!(1, 2);
+
+    let profile_page_id = project_info
+        .graph
+        .components
+        .iter()
+        .position(|component| component.name == "ProfilePage")
+        .expect("expected ProfilePage component in graph");
+
+    let incoming_profile_edge = project_info
+        .graph
+        .resolved_render_edges
+        .iter()
+        .flatten()
+        .find(|edge| edge.child_component_id == profile_page_id)
+        .expect("expected incoming resolved edge for ProfilePage");
+
+    let page_shell_id = incoming_profile_edge.parent_jsx_component_id;
+    assert_eq!(
+        project_info.graph.components[page_shell_id].name,
+        "PageShell"
+    );
+
+    assert_eq!(
+        project_info.graph.resolved_render_edges[page_shell_id].len(),
+        1
+    );
+    // TODO: this shouldn't be [0], but .find -> Children NodeId, which might be -1
+    let page_shell_to_child_edge = &project_info.graph.resolved_render_edges[page_shell_id][0];
+    assert_eq!(page_shell_to_child_edge.parent_component_id, page_shell_id);
+    assert_eq!(
+        page_shell_to_child_edge.parent_jsx_component_id,
+        page_shell_id
+    );
+
+    let content_frame_id = page_shell_to_child_edge.parent_jsx_component_id;
+    let content_frame = &project_info.graph.components[content_frame_id];
+    assert_eq!(content_frame.name, "ContentFrame");
+}
+
 fn fixture_input_path(fixture_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")

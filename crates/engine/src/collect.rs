@@ -14,8 +14,9 @@ use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, CallExpression, Declaration, ExportAllDeclaration, ExportDefaultDeclaration,
     ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression, Function, ImportDeclaration,
-    ImportDeclarationSpecifier, JSXAttributeItem, JSXElement, JSXElementName, JSXOpeningElement,
-    ModuleExportName, VariableDeclarationKind, VariableDeclarator,
+    ImportDeclarationSpecifier, JSXAttributeItem, JSXElement, JSXElementName, JSXExpression,
+    JSXExpressionContainer, JSXOpeningElement, ModuleExportName, VariableDeclarationKind,
+    VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -427,6 +428,48 @@ impl<'a> Visit<'a> for AstCollector {
         } else {
             walk::walk_jsx_element(self, jsx_element);
         }
+    }
+
+    fn visit_jsx_expression_container(
+        &mut self,
+        jsx_expression_container: &JSXExpressionContainer<'a>,
+    ) {
+        if let Some(current_component_node_id) = self.component_stack.last() {
+            let current_component_name = self.components[*current_component_node_id].name.clone();
+
+            let child_rendered_symbol = match &jsx_expression_container.expression {
+                JSXExpression::Identifier(identifier) if identifier.name.as_str() == "children" => {
+                    Some("children".to_string())
+                }
+                JSXExpression::StaticMemberExpression(member_expression)
+                    if member_expression
+                        .object
+                        .get_identifier_reference()
+                        .is_some_and(|identifier| identifier.name.as_str() == "props")
+                        && member_expression.property.name.as_str() == "children" =>
+                {
+                    Some("children".to_string())
+                }
+                _ => None,
+            };
+
+            if let Some(child_rendered_symbol) = child_rendered_symbol {
+                let parent_jsx_symbol = self
+                    .jsx_symbol_stack
+                    .last()
+                    .unwrap_or(&current_component_name)
+                    .to_string();
+
+                self.unresolved_render_edges.push(UnresolvedRenderEdge {
+                    parent_component_name: current_component_name,
+                    child_rendered_symbol,
+                    parent_jsx_symbol,
+                    span: jsx_expression_container.span,
+                });
+            }
+        }
+
+        walk::walk_jsx_expression_container(self, jsx_expression_container);
     }
 }
 
