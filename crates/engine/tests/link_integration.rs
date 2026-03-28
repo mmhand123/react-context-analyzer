@@ -104,6 +104,30 @@ fn linker_resolves_default_export() {
 }
 
 #[test]
+fn linker_resolves_default_import() {
+    let fixture_input = fixture_input_path("link_resolves_default_import");
+    let source_files =
+        load_source_files(&fixture_input).expect("fixture source files should load cleanly");
+
+    let project_info = collect_project_info(&source_files);
+
+    let app_children = project_info.graph.resolved_render_edges[0].clone();
+    assert_eq!(app_children.len(), 1);
+    assert_eq!(app_children[0].parent_component_id, 0);
+    assert_eq!(app_children[0].child_component_id, 1);
+    assert_eq!(app_children[0].parent_jsx_component_id, 0);
+
+    let child_component = project_info.graph.components[app_children[0].child_component_id].clone();
+    let parent_component =
+        project_info.graph.components[app_children[0].parent_component_id].clone();
+    let parent_jsx_component =
+        project_info.graph.components[app_children[0].parent_jsx_component_id].clone();
+    assert_eq!(parent_component.name, "App");
+    assert_eq!(parent_jsx_component.name, "App");
+    assert_eq!(child_component.name, "ProfilePage");
+}
+
+#[test]
 fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
     let fixture_input = fixture_input_path("link_resolves_nested_children");
     let source_files =

@@ -64,6 +64,7 @@ pub fn build_project_graph(files: &[FileInfo]) -> ProjectGraph {
                 for export_symbol in &file_info.module_exports {
                     let export_name = match export_symbol.kind {
                         ExportKind::Named => export_symbol.export_name.clone(),
+                        ExportKind::Default => "default".to_string(),
                         _ => export_symbol.local_name.clone().unwrap_or_default(),
                     };
 
@@ -175,6 +176,7 @@ fn resolve_child_component(
     let export_symbol =
         exports_map.get(&(resolved_file_path.clone(), import_symbol.local_name.clone()));
 
+    // Handle named exports/export aliases explicitly
     if let Some(export_symbol) = export_symbol {
         let export_local_component_name = export_symbol.local_name.clone().unwrap_or_default();
 
@@ -184,8 +186,22 @@ fn resolve_child_component(
     }
 
     match import_symbol.kind {
-        // TODO: handle default imports properly
-        ImportKind::Default => None,
+        ImportKind::Default => {
+            let export_default_symbol =
+                exports_map.get(&(resolved_file_path.clone(), "default".to_string()));
+
+            if let Some(export_default_symbol) = export_default_symbol {
+                let export_default_component_name =
+                    export_default_symbol.local_name.clone().unwrap_or_default();
+
+                return components_map
+                    .get(&(resolved_file_path, export_default_component_name))
+                    .cloned();
+            }
+
+            // This would technically be an error but we're not here to parse syntax
+            None
+        }
         ImportKind::Named => {
             let imported_name = import_symbol
                 .imported_name
