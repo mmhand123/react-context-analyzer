@@ -309,6 +309,26 @@ fn linker_resolves_children_projection_parent_jsx() {
 
     assert_eq!(1, 2);
 
+    /*
+     *
+     * For this we really want to do something like this:
+     *
+     * In App.tsx:
+     * ProfilePage -> PageShell -> PageShell.tsx
+     *
+     * In PageShell.tsx:
+     * Children -> ContentFrame -> ContentFrame.tsx
+     *
+     * In ContentFrame.tsx:
+     * Children -> Section -> yield PageShell.tsx
+     *
+     * In PageShell.tsx:
+     * yield App.tsx
+     *
+     * In App.tsx:
+     * reach top of render tree
+     *
+     */
     let profile_page_id = project_info
         .graph
         .components
