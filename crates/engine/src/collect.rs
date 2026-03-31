@@ -435,6 +435,7 @@ impl<'a> Visit<'a> for AstCollector {
         jsx_expression_container: &JSXExpressionContainer<'a>,
     ) {
         if let Some(current_component_node_id) = self.component_stack.last() {
+            let next_component_node_id = self.components.len();
             let current_component_name = self.components[*current_component_node_id].name.clone();
 
             let child_rendered_symbol = match &jsx_expression_container.expression {
@@ -462,8 +463,14 @@ impl<'a> Visit<'a> for AstCollector {
 
                 self.unresolved_render_edges.push(UnresolvedRenderEdge {
                     parent_component_name: current_component_name,
-                    child_rendered_symbol,
+                    child_rendered_symbol: child_rendered_symbol.clone(),
                     parent_jsx_symbol,
+                    span: jsx_expression_container.span,
+                });
+
+                self.components.push(ComponentDef {
+                    node_id: next_component_node_id,
+                    name: child_rendered_symbol.clone(),
                     span: jsx_expression_container.span,
                 });
             }

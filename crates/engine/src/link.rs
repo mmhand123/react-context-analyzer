@@ -93,21 +93,50 @@ pub fn build_project_graph(files: &[FileInfo]) -> ProjectGraph {
         for edge in &file_info.unresolved_render_edges {
             let current_file_path = normalize_file_path_string(&file_info.file_path);
             // TODO - figure out all this clone nonsense
-            let parent_component = components_map.get(&(
-                current_file_path.clone(),
-                edge.parent_component_name.clone(),
-            ));
+            let parent_component = components_map
+                .get(&(
+                    current_file_path.clone(),
+                    edge.parent_component_name.clone(),
+                ))
+                .expect("we should always have a parent component here");
 
-            if let Some(parent_component) = parent_component
-                && let Some(child_component) = resolve_child_component(
-                    file_info,
-                    &edge.child_rendered_symbol,
-                    &resolver,
-                    &current_file_path,
-                    &components_map,
-                    &exports_map,
-                )
-            {
+            // TODO: these names are confusing even me
+            let parent_jsx_component = resolve_child_component(
+                file_info,
+                &edge.parent_jsx_symbol,
+                &resolver,
+                &current_file_path,
+                &components_map,
+                &exports_map,
+            );
+
+            if &edge.child_rendered_symbol == "children" {
+                let children_component = resolve_children(&current_file_path, &components_map);
+
+                if let Some(children_component) = children_component {
+                    graph.resolved_render_edges[parent_component.node_id].push(
+                        ResolvedRenderEdge {
+                            parent_component_id: parent_component.node_id,
+                            child_component_id: children_component.node_id,
+                            parent_jsx_component_id: parent_jsx_component
+                                .unwrap_or(parent_component.clone())
+                                .node_id,
+                            span: edge.span,
+                        },
+                    );
+
+                    continue;
+                }
+            }
+
+            if let Some(child_component) = resolve_child_component(
+                file_info,
+                &edge.child_rendered_symbol,
+                &resolver,
+                &current_file_path,
+                &components_map,
+                &exports_map,
+            ) {
                 if edge.parent_jsx_symbol == edge.parent_component_name {
                     graph.resolved_render_edges[parent_component.node_id].push(
                         ResolvedRenderEdge {
@@ -117,14 +146,7 @@ pub fn build_project_graph(files: &[FileInfo]) -> ProjectGraph {
                             span: edge.span,
                         },
                     );
-                } else if let Some(parent_jsx_component) = resolve_child_component(
-                    file_info,
-                    &edge.parent_jsx_symbol,
-                    &resolver,
-                    &current_file_path,
-                    &components_map,
-                    &exports_map,
-                ) {
+                } else if let Some(parent_jsx_component) = parent_jsx_component {
                     graph.resolved_render_edges[parent_component.node_id].push(
                         ResolvedRenderEdge {
                             parent_component_id: parent_component.node_id,
@@ -147,6 +169,8 @@ pub fn build_project_graph(files: &[FileInfo]) -> ProjectGraph {
     graph
 }
 
+/// Resolves any Component underneath another component in a local render tree
+/// to a stable component across all files
 fn resolve_child_component(
     file_info: &FileInfo,
     child_symbol: &str,
@@ -155,10 +179,6 @@ fn resolve_child_component(
     components_map: &HashMap<ComponentKey, Component>,
     exports_map: &HashMap<ExportSymbolKey, ExportSymbol>,
 ) -> Option<Component> {
-    // TODO: I think if child_symbol is "children" we need to return a Component with a predefined
-    // node_id, something like -1 that we know is always children. Means we need to move away from
-    // usize for node_id thoough...
-    // Or we can resolve children separately somehow
     let import_symbol = file_info.module_imports.iter().find(|import_symbol| {
         if import_symbol.is_type_only {
             return false;
@@ -226,6 +246,16 @@ fn resolve_child_component(
                 .cloned()
         }
     }
+}
+
+/// Resolves the actual "children" symbol in a JSX render tree into a pseudo-component
+fn resolve_children(
+    current_file_path: &String,
+    components_map: &HashMap<ComponentKey, Component>,
+) -> Option<Component> {
+    return components_map
+        .get(&(current_file_path.clone(), "children".to_string()))
+        .cloned();
 }
 
 fn resolve_options() -> ResolveOptions {

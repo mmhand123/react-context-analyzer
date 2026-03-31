@@ -12,8 +12,6 @@ fn linker_resolves_named_import_render_edge() {
 
     let project_info = collect_project_info(&source_files);
 
-    println!("{:?}", project_info.graph.resolved_render_edges);
-
     let app_children = project_info.graph.resolved_render_edges[0].clone();
 
     assert_eq!(app_children.len(), 1);
@@ -155,6 +153,7 @@ fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
         ("App".to_string(), "PageShell".to_string()),
         ("App".to_string(), "ProfilePage".to_string()),
         ("PageShell".to_string(), "GlobalNav".to_string()),
+        ("PageShell".to_string(), "children".to_string()),
         ("ProfilePage".to_string(), "Avatar".to_string()),
     ]);
 
@@ -183,6 +182,11 @@ fn linker_resolves_nested_children_and_tracks_parent_jsx_symbol() {
             "PageShell".to_string(),
             "PageShell".to_string(),
             "GlobalNav".to_string(),
+        ),
+        (
+            "PageShell".to_string(),
+            "PageShell".to_string(),
+            "children".to_string(),
         ),
         (
             "ProfilePage".to_string(),
@@ -307,8 +311,6 @@ fn linker_resolves_children_projection_parent_jsx() {
 
     println!("{:#?}", project_info.graph);
 
-    assert_eq!(1, 2);
-
     /*
      *
      * For this we really want to do something like this:
@@ -352,19 +354,31 @@ fn linker_resolves_children_projection_parent_jsx() {
 
     assert_eq!(
         project_info.graph.resolved_render_edges[page_shell_id].len(),
-        1
+        2
     );
-    // TODO: this shouldn't be [0], but .find -> Children NodeId, which might be -1
-    let page_shell_to_child_edge = &project_info.graph.resolved_render_edges[page_shell_id][0];
+
+    let page_shell_to_child_edge = &project_info.graph.resolved_render_edges[page_shell_id]
+        .iter()
+        .find(|edge| {
+            let component = &project_info.graph.components[edge.child_component_id];
+
+            component.name == "children"
+        })
+        .expect("expected children edge");
     assert_eq!(page_shell_to_child_edge.parent_component_id, page_shell_id);
-    assert_eq!(
-        page_shell_to_child_edge.parent_jsx_component_id,
-        page_shell_id
-    );
 
     let content_frame_id = page_shell_to_child_edge.parent_jsx_component_id;
     let content_frame = &project_info.graph.components[content_frame_id];
+
     assert_eq!(content_frame.name, "ContentFrame");
+
+    let content_frame_edges = &project_info.graph.resolved_render_edges[content_frame_id];
+    let content_frame_children_edge = &content_frame_edges[0];
+    assert_eq!(content_frame_edges.len(), 1);
+    assert_eq!(
+        &project_info.graph.components[content_frame_children_edge.child_component_id].name,
+        "children"
+    );
 }
 
 fn fixture_input_path(fixture_name: &str) -> PathBuf {
